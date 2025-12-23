@@ -28,7 +28,8 @@ class RosCoverageConfig:
     # step()에서 action 유지 시간(초)
     step_dt: float = 0.15
 
-    max_steps: int = 600
+    # max_steps: int = 600
+    max_steps: int = 800
     warmup_steps: int = 8
 
     # 충돌 판정
@@ -38,13 +39,17 @@ class RosCoverageConfig:
     very_near_dist: float = 0.25
 
     # coverage (odom 기반 방문 셀)
-    cell_size: float = 0.25  # 25cm 그리드
+    # cell_size: float = 0.25  # 25cm 그리드
+    cell_size: float = 0.30
     # reward_new_cell: float = 1.0
     reward_new_cell: float = 2.0
     reward_revisit: float = 0.0
     reward_forward_after_turn: float = 0.05
+    reward_cov_progress: float = 0.5
+    reward_frontier: float = 0.05
     penalty_step: float = -0.01
-    penalty_turn: float = -0.01
+    penalty_arc: float = -0.0
+    penalty_turn: float = -0.03
     penalty_turn_streak: float = -0.1
     penalty_standing: float = -0.03
     penalty_near: float = -0.01
@@ -52,13 +57,15 @@ class RosCoverageConfig:
     penalty_collision: float = -10.0
 
     # 목표: 방문한 셀 개수(간단 버전)
-    target_visited_cells: int = 250
+    # target_visited_cells: int = 250
+    target_visited_cells: int = 100
 
     # cmd_vel 매핑
     # v_forward: float = 0.18
     # w_forward: float = 0.05
     # w_turn: float = 0.9
     v_forward: float = 0.18
+    v_turn: float = 0.5
     w_forward: float = 0.0
     w_turn: float = 1.2
 
@@ -73,8 +80,10 @@ class RosCoverageEnv(gym.Env):
     """
     ROS2 + Gazebo에서 커버리지용 Gym Env (cmd_vel 직접 제어)
 
-    Action (Discrete 4):
-      0: forward, 1: left, 2: right, 3: stop
+    # Action (Discrete 4):
+    #   0: forward, 1: left, 2: right, 3: stop
+    Action (Discrete 6):
+      0: forward, 1: left-arc, 2: right-arc, 3: left-turn, 4: right-turn, 5: stop
 
     Observation (벡터):
       [lidar_bins(0~1), x_tanh, y_tanh, sin(yaw), cos(yaw), coverage_tanh, step_frac]
@@ -90,15 +99,18 @@ class RosCoverageEnv(gym.Env):
         # self._min_dist_hist = deque(maxlen=5)
         # self._last_min_dist = float("inf")
 
-        self._prev_action = 3
+        # self._prev_action = 3
+        self._prev_action = 5
 
         # self._last_min_raw = float("inf")
         # self._last_min_filt = float("inf")
 
         # obs 차원 = lidar_bins + 6
-        obs_dim = self.cfg.lidar_bins + 6
+        # obs_dim = self.cfg.lidar_bins + 6
+        obs_dim = self.cfg.lidar_bins + 9
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
-        self.action_space = spaces.Discrete(4)
+        # self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(6)
 
         # ROS init
         if not rclpy.ok():
@@ -125,7 +137,8 @@ class RosCoverageEnv(gym.Env):
         self.visited_cells = set()
 
         # 마지막으로 보낸 cmd_vel (디버그)
-        self._last_action = 3
+        # self._last_action = 3
+        self._last_action = 5
 
     def close(self):
         # 로봇 멈추고 종료
@@ -168,6 +181,7 @@ class RosCoverageEnv(gym.Env):
         self._mark_visited(x, y)
 
         self._prev_xy = self._get_pose()[:2]
+        self._prev_cov = self._coverage_ratio_like()
 
         self.new_cell = False
         self.new_cells_this_ep = 0
@@ -186,19 +200,42 @@ class RosCoverageEnv(gym.Env):
         self._last_action = int(action)
 
         # 1) action -> cmd_vel
+        # if action == 0:      # forward
+        #     v, w = self.cfg.v_forward, 0.0
+        #     self.forward_count += 1
+        #     self._turn_streak = 0
+        # elif action == 1:    # left
+        #     v, w = self.cfg.w_forward, self.cfg.w_turn
+        #     self.turn_count += 1
+        #     self._turn_streak += 1
+        # elif action == 2:    # right
+        #     v, w = self.cfg.w_forward, -self.cfg.w_turn
+        #     self.turn_count += 1
+        #     self._turn_streak += 1
+        # elif action == 3:    # stop
+        #     v, w = 0.0, 0.0
+        #     self._turn_streak = 0
+        # else:
+        #     raise ValueError(f"Invalid action: {action}")
         if action == 0:      # forward
             v, w = self.cfg.v_forward, 0.0
             self.forward_count += 1
             self._turn_streak = 0
-        elif action == 1:    # left
+        elif action == 1:    # left-arc
+            v, w = self.cfg.w_forward, self.cfg.v_turn
+            self._turn_streak = 0
+        elif action == 2:    # right-arc
+            v, w = self.cfg.w_forward, -self.cfg.v_turn
+            self._turn_streak = 0
+        elif action == 3:    # left-turn
             v, w = self.cfg.w_forward, self.cfg.w_turn
             self.turn_count += 1
             self._turn_streak += 1
-        elif action == 2:    # right
+        elif action == 4:    # right-turn
             v, w = self.cfg.w_forward, -self.cfg.w_turn
             self.turn_count += 1
             self._turn_streak += 1
-        elif action == 3:    # stop
+        elif action == 5:    # stop
             v, w = 0.0, 0.0
             self._turn_streak = 0
         else:
@@ -210,7 +247,7 @@ class RosCoverageEnv(gym.Env):
         # 3) 보상/종료 계산
         reward = self.cfg.penalty_step
         # penalty_turn
-        if action in (1, 2):
+        if action in (3, 4):
             reward += self.cfg.penalty_turn
         # penalty_turn_streak
         if self._turn_streak >= 8:
@@ -226,8 +263,17 @@ class RosCoverageEnv(gym.Env):
         # reward_forward_after_turn
         prev_action = self._prev_action
         self._prev_action = action
-        if prev_action in (1,2) and action == 0:
+        if prev_action in (3,4) and action in (0,1,2):
             reward += self.cfg.reward_forward_after_turn
+        # coverage
+        cov = self._coverage_ratio_like()
+        delta_cov = cov - self._prev_cov
+        self._prev_cov = cov
+        reward += self.cfg.reward_cov_progress * delta_cov
+        # frontier
+        cell = self._cell_index(x, y)
+        unv_ratio = self._unvisited_neighbor_ratio(cell, radius=1)
+        reward += self.cfg.reward_frontier * unv_ratio
         done = False
 
         # 충돌 체크
@@ -432,7 +478,21 @@ class RosCoverageEnv(gym.Env):
         cov = self._coverage_ratio_like()
         step_frac = self.step_count / float(max(1, self.cfg.max_steps))
 
-        extra = np.array([x_s, y_s, siny, cosy, cov, step_frac], dtype=np.float32)
+        # ahead / left / right 위치의 셀을 "미리" 확인
+        ax = x + self.cfg.cell_size * math.cos(yaw + 0.0)
+        ay = y + self.cfg.cell_size * math.sin(yaw + 0.0)
+
+        lx = x + self.cfg.cell_size * math.cos(yaw + math.pi / 2.0)
+        ly = y + self.cfg.cell_size * math.sin(yaw + math.pi / 2.0)
+
+        rx = x + self.cfg.cell_size * math.cos(yaw - math.pi / 2.0)
+        ry = y + self.cfg.cell_size * math.sin(yaw - math.pi / 2.0)
+
+        unv_a = self._is_unvisited_cell(self._cell_index(ax, ay))
+        unv_l = self._is_unvisited_cell(self._cell_index(lx, ly))
+        unv_r = self._is_unvisited_cell(self._cell_index(rx, ry))
+
+        extra = np.array([x_s, y_s, siny, cosy, cov, step_frac, unv_a, unv_l, unv_r], dtype=np.float32)
         obs = np.concatenate([lidar, extra], axis=0).astype(np.float32)
 
         return obs
@@ -462,3 +522,23 @@ class RosCoverageEnv(gym.Env):
             # "min_dist_raw": self._last_min_raw,
             # "min_dist_filt": self._last_min_filt,
         }
+    
+    def _peek_cell(self, x: float, y: float, yaw: float, rel_angle: float, dist: float) -> Tuple[int, int]:
+        import math
+        px = x + dist * math.cos(yaw + rel_angle)
+        py = y + dist * math.sin(yaw + rel_angle)
+        return self._cell_index(px, py)
+    
+    def _is_unvisited_cell(self, cell: Tuple[int, int]) -> float:
+        return 1.0 if cell not in self.visited_cells else 0.0
+
+    def _unvisited_neighbor_ratio(self, cell: Tuple[int, int], radius: int = 1) -> float:
+        cx, cy = cell
+        total = 0
+        unv = 0
+        for dx in range(-radius, radius+1):
+            for dy in range(-radius, radius+1):
+                total += 1
+                if (cx+dx, cy+dy) not in self.visited_cells:
+                    unv += 1
+        return unv / float(total)

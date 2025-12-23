@@ -67,7 +67,8 @@ class QNet(nn.Module):
 class HParams:
     seed: int = 0
     total_episodes: int = 800
-    max_steps: int = 600
+    # max_steps: int = 600
+    max_steps: int = 800
 
     gamma: float = 0.99
     # lr: float = 1e-3
@@ -118,6 +119,34 @@ def select_action(qnet: QNet, obs: np.ndarray, n_actions: int, eps: float, devic
 
 
 def train_step(qnet, target, optim_, batch, gamma, grad_clip, device):
+    # DQN
+    # s, a, r, s2, done = batch
+    # s = torch.from_numpy(s).to(device)
+    # a = torch.from_numpy(a).to(device)
+    # r = torch.from_numpy(r).to(device)
+    # s2 = torch.from_numpy(s2).to(device)
+    # done = torch.from_numpy(done).to(device)
+
+    # # Q(s,a)
+    # q = qnet(s)  # [B, A]
+    # q_sa = q.gather(1, a.view(-1, 1)).squeeze(1)  # [B]
+
+    # # target: r + gamma * max_a' Q_target(s',a') * (1-done)
+    # with torch.no_grad():
+    #     q2 = target(s2)
+    #     max_q2 = torch.max(q2, dim=1).values
+    #     y = r + gamma * max_q2 * (1.0 - done)
+
+    # loss = nn.SmoothL1Loss()(q_sa, y)
+
+    # optim_.zero_grad(set_to_none=True)
+    # loss.backward()
+    # nn.utils.clip_grad_norm_(qnet.parameters(), grad_clip)
+    # optim_.step()
+
+    # return float(loss.item())
+
+    # Double DQN (DDQN)
     s, a, r, s2, done = batch
     s = torch.from_numpy(s).to(device)
     a = torch.from_numpy(a).to(device)
@@ -129,11 +158,16 @@ def train_step(qnet, target, optim_, batch, gamma, grad_clip, device):
     q = qnet(s)  # [B, A]
     q_sa = q.gather(1, a.view(-1, 1)).squeeze(1)  # [B]
 
-    # target: r + gamma * max_a' Q_target(s',a') * (1-done)
     with torch.no_grad():
-        q2 = target(s2)
-        max_q2 = torch.max(q2, dim=1).values
-        y = r + gamma * max_q2 * (1.0 - done)
+        # ✅ Double DQN:
+        # 1) online 네트워크로 다음 상태에서 argmax action 선택
+        next_actions = torch.argmax(qnet(s2), dim=1)  # [B]
+
+        # 2) target 네트워크로 그 action의 Q값 평가
+        q2_target = target(s2)  # [B, A]
+        q2_sa = q2_target.gather(1, next_actions.view(-1, 1)).squeeze(1)  # [B]
+
+        y = r + gamma * q2_sa * (1.0 - done)
 
     loss = nn.SmoothL1Loss()(q_sa, y)
 

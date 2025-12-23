@@ -34,11 +34,27 @@ def select_action_greedy(qnet, obs, device):
     return int(torch.argmax(q, dim=1).item())
 
 
+def recovery(env: RosCoverageEnv):
+    # 1) stop 0.2s
+    env._hold_action(0.0, 0.0, 0.2)
+
+    # 2) back 0.6s (env에 후진이 없으면 직접 publish로 구현 필요)
+    env._hold_action(-0.10, 0.0, 0.6)
+
+    # 후진이 env에 없다면 rotate만으로도 복구 가능:
+    # 2) rotate 0.9s
+    env._hold_action(0.0, +1.2, 0.9)
+
+    # 3) forward 0.4s
+    env._hold_action(+0.12, 0.0, 0.4)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, required=True, help="path to trained .pt")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--sleep", type=float, default=0.05, help="step delay (sec)")
+    parser.add_argument("--done", action="store_true")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -99,7 +115,11 @@ def main():
                 time.sleep(args.sleep)
 
             if done:
-                break
+                if args.done:
+                    break
+                else:
+                    print("[RECOVERY]")
+                    recovery(env)
 
         print(f"[EP {ep}] steps={step} reward={ep_reward:.2f}")
 

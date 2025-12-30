@@ -24,3 +24,47 @@ python3 -m proj_wifi_heatmap_rl.train_dqn --resume runs_dqn/dqn_ep0800.pt --more
 python3 -m proj_wifi_heatmap_rl.test_dqn_policy --ckpt runs_dqn/dqn_ep0800.pt
 python3 -m proj_wifi_heatmap_rl.test_dqn_policy --ckpt runs_dqn/dqn_ep0800.pt --episodes 1 --sleep 0.05
 ```
+
+---
+
+### Publish Test Topic
+
+```bash
+# once
+ros2 topic pub --once /amcl_pose geometry_msgs/msg/PoseWithCovarianceStamped "{
+  header: {
+    frame_id: map
+  },
+  pose: {
+    pose: {
+      position: {x: 1.0, y: 2.0, z: 0.0},
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    },
+    covariance: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  }
+}"
+
+# 2Hz
+ros2 topic pub /amcl_pose geometry_msgs/msg/PoseWithCovarianceStamped "{
+  header: {
+    frame_id: map
+  },
+  pose: {
+    pose: {
+      position: {x: 1.0, y: 2.0, z: 0.0},
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    },
+    covariance: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  }
+}" -r 2
+```

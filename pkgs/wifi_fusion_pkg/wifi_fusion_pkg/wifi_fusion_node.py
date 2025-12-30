@@ -1,57 +1,46 @@
 import rclpy
 from rclpy.node import Node
-
+from wifi_interface.msg import WifiRssi, WifiFused
 from geometry_msgs.msg import Point
-from custom_interfaces.msg import WifiRaw, WifiFused
 
-
-class WifiFusionNode(Node):
+class FusionNode(Node):
     def __init__(self):
-        super().__init__('wifi_fusion_node')
+        super().__init__('fusion_node')
 
-        self.latest_grid = None
+        self.sub_rssi = self.create_subscription(
+            WifiRssi, '/wifi/rssi', self.rssi_cb, 10)
+        self.sub_pose = self.create_subscription(
+            Point, '/pose/dummy', self.pose_cb, 10)
 
-        self.create_subscription(
-            WifiRaw,
-            '/wifi/raw',
-            self.wifi_callback,
-            10
-        )
+        self.pub = self.create_publisher(WifiFused, '/wifi/fused', 10)
 
-        self.create_subscription(
-            Point,
-            '/grid_pose',
-            self.grid_callback,
-            10
-        )
+        self.last_rssi = None
+        self.last_pose = None
 
-        self.publisher = self.create_publisher(
-            WifiFused,
-            '/wifi/fused',
-            10
-        )
+    def rssi_cb(self, msg):
+        self.last_rssi = msg
+        self.try_publish()
 
-        self.get_logger().info("WiFi Fusion Node started")
+    def pose_cb(self, msg):
+        self.last_pose = msg
+        self.try_publish()
 
-    def grid_callback(self, msg):
-        self.latest_grid = (int(msg.x), int(msg.y))
+    def try_publish(self):
+        if self.last_rssi and self.last_pose:
+            fused = WifiFused()
+            fused.timestamp = self.last_rssi.timestamp
+            fused.x = float(self.last_pose.x)
+            fused.y = float(self.last_pose.y)
+            fused.rssi = self.last_rssi.rssi
 
-    def wifi_callback(self, msg):
-        if self.latest_grid is None:
-            return
-
-        fused = WifiFused()
-        fused.grid_x = self.latest_grid[0]
-        fused.grid_y = self.latest_grid[1]
-        fused.ssid = msg.ssid
-        fused.rssi = msg.rssi
-        fused.stamp = msg.stamp
-
-        self.publisher.publish(fused)
-
+            self.pub.publish(fused)
+            self.get_logger().info(
+                f"FUSED x={fused.x:.2f}, y={fused.y:.2f}, rssi={fused.rssi}"
+            )
 
 def main():
     rclpy.init()
-    rclpy.spin(WifiFusionNode())
+    node = FusionNode()
+    rclpy.spin(node)
+    node.destroy_node()
     rclpy.shutdown()
-

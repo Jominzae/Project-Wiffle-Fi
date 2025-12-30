@@ -29,7 +29,9 @@ class RosCoverageConfig:
     step_dt: float = 0.15
 
     # max_steps: int = 600
-    max_steps: int = 800
+    # max_steps: int = 800
+    # max_steps: int = 1000
+    max_steps: int = 1200
     warmup_steps: int = 8
 
     # 충돌 판정
@@ -175,6 +177,9 @@ class RosCoverageEnv(gym.Env):
 
         # 2) 센서 안정화
         self._wait_sensors(timeout_sec=3.0)
+
+        # 2.5) (임시) 리셋 후 왼쪽 회전
+        self._reset_turn_left_random()
 
         # 3) 첫 visited 마킹
         x, y, _ = self._get_pose()
@@ -542,3 +547,57 @@ class RosCoverageEnv(gym.Env):
                 if (cx+dx, cy+dy) not in self.visited_cells:
                     unv += 1
         return unv / float(total)
+    
+    def _normalize_angle(self, a: float) -> float:
+        # [-pi, pi]로 정규화
+        import math
+        while a > math.pi:
+            a -= 2.0 * math.pi
+        while a < -math.pi:
+            a += 2.0 * math.pi
+        return a
+    
+    def _reset_turn_left_random(self):
+        """
+        reset 직후: odom yaw 기준으로 왼쪽(+)으로 90도 회전하고 정지.
+        - yaw 기반 제어라서 dt/프레임에 덜 민감함
+        """
+        import math
+        import random
+
+        # 센서/odom 준비 안 됐으면 그냥 스킵
+        if self._odom is None:
+            return
+
+        turn_deg = random.uniform(0.0, 135.0)
+        _, _, yaw0 = self._get_pose()
+        target = self._normalize_angle(yaw0 + math.radians(turn_deg))
+        tol = math.radians(2.0)
+
+        # 각속도(왼쪽 회전)
+        # w = float(getattr(self.cfg, "reset_turn_w", self.cfg.w_turn))
+
+        t0 = time.time()
+        while True:
+            # timeout
+            if time.time() - t0 > float(getattr(self.cfg, "reset_turn_timeout", 4.0)):
+                break
+
+            # 현재 yaw
+            _, _, yaw = self._get_pose()
+            err = self._normalize_angle(target - yaw)
+
+            if abs(err) <= tol:
+                break
+
+            # 목표까지 계속 좌회전(필요하면 w를 err 부호로 조절 가능하지만,
+            # 여기선 항상 왼쪽 90도니까 +w 고정으로 충분)
+            self._publish_twist(0.0, self.cfg.w_turn)
+            rclpy.spin_once(self.node, timeout_sec=0.02)
+            time.sleep(0.02)
+
+        # 정지 + 한 번 더 센서 갱신
+        self._publish_twist(0.0, 0.0)
+        t1 = time.time()
+        while time.time() - t1 < 0.2:
+            rclpy.spin_once(self.node, timeout_sec=0.02)

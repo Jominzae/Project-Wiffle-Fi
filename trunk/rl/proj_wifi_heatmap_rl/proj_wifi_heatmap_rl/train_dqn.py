@@ -67,8 +67,6 @@ class QNet(nn.Module):
 class HParams:
     seed: int = 0
     total_episodes: int = 800
-    # max_steps: int = 600
-    max_steps: int = 800
 
     gamma: float = 0.99
     # lr: float = 1e-3
@@ -292,7 +290,7 @@ def main():
         ep_loss = 0.0
         ep_updates = 0
 
-        for step in range(hp.max_steps):
+        for step in range(env.cfg.max_steps):
             eps = linear_eps(global_step, hp.eps_start, hp.eps_end, hp.eps_decay_steps)
             if args.resume and (global_step - resume_step) < 20_000:
                 eps = max(eps, 0.2)

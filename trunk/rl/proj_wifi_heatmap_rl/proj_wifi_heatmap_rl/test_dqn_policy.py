@@ -63,6 +63,10 @@ def main():
     # Env 생성
     # -----------------------------
     env = RosCoverageEnv()
+    if hasattr(env, "cfg") and hasattr(env.cfg, "max_steps"):
+        env.cfg.max_steps = 20000
+    if hasattr(env, "cfg") and hasattr(env.cfg, "target_visited_cells"):
+        env.cfg.target_visited_cells = 150
 
     # obs / action dim 추론
     obs = env.reset()
@@ -71,7 +75,9 @@ def main():
     obs = np.asarray(obs, dtype=np.float32)
 
     obs_dim = obs.shape[0]
-    n_actions = 4  # 네 action 정의 기준
+    # n_actions = 4  # 네 action 정의 기준
+    # n_actions = 6
+    n_actions = int(env.action_space.n) if hasattr(env, "action_space") else 6
 
     # -----------------------------
     # Model 로드
@@ -115,6 +121,7 @@ def main():
                 time.sleep(args.sleep)
 
             if done:
+                print(f"[DONE] step: {info.get('step', 0)} visited_cells: {info.get('visited_cells', 0)} collision: {info.get('collision', 0)}")
                 if args.done:
                     break
                 else:

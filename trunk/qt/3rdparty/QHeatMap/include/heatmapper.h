@@ -1,5 +1,6 @@
 #pragma once
 #include <QVector>
+#include <QString>
 
 class QImage;
 class QColor;
@@ -8,13 +9,11 @@ class GradientPalette;
 class HeatMapper
 {
 public:
+    // absoluteMode=true면 intensity01을 절대 스케일로 사용(권장)
+    // cap01=true면 누적값을 1.0에서 포화(clamp)시킴
     HeatMapper(QImage *image, GradientPalette *palette,
                int radius, int opacity,
-               bool absoluteMode = false,
-               bool cap01 = false,
-               bool useSaturCurve = false,
-               double saturK = 1.0);
-
+               bool absoluteMode = false, bool cap01 = false);
 
     ~HeatMapper();
 
@@ -28,6 +27,7 @@ public:
 
     void setPalette(GradientPalette *palette);
     qreal getCount(int x, int y);
+    void save(const QString &fname);
 
 private:
     qreal increase(int x, int y, qreal delta);
@@ -37,13 +37,12 @@ private:
     int radius_ = 18;
     int opacity_ = 160;
 
+    // 기존: 상대 정규화용 최대값
     qreal max_ = 1.0;
 
+    // 추가: 절대모드
     bool absoluteMode_ = false;
     bool cap01_ = false;
-
-    bool useSaturCurve_ = false;
-    qreal saturK_ = 1.0;
 
     int width_ = 0;
     int height_ = 0;

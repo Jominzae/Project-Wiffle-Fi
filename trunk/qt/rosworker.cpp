@@ -92,7 +92,7 @@ void RosWorker::run()
             double roll=0, pitch=0, yaw=0;
             tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
 
-            // ✅ AMCL covariance 기반 유효성 판단 (값이 크면 아직 수렴 전)
+            // AMCL covariance 기반 유효성 판단 (값이 크면 아직 수렴 전)
             // covariance 배열에서 x,y,yaw 분산(대각 성분) 사용
             const auto &C = msg->pose.covariance;
             const double var_x   = C[0];   // xx

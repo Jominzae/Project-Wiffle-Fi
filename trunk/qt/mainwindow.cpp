@@ -1,6 +1,6 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
 #include "dbmanager.h"
+#include "ui_mainwindow.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -15,7 +15,7 @@
 #include <QTimer>
 #include <QDateTime>
 
-    static inline double rad2deg(double r) { return r * 180.0 / M_PI; }
+static inline double rad2deg(double r) { return r * 180.0 / M_PI; }
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -24,16 +24,16 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     //======================12-29============================
-    ui->leftPanel->setVisible(false);                 // 디폴트: 왼쪽 패널 숨김
+    ui->leftPanel_2->setVisible(false);                 // 디폴트: 왼쪽 패널 숨김
     ui->leftStack->setCurrentWidget(ui->pageSession); // 기본 페이지(숨겨져 있어도 OK)
 
     auto showPanel = [&](QWidget* page) {
-        ui->leftPanel->setVisible(true);
+        ui->leftPanel_2->setVisible(true);
         ui->leftStack->setCurrentWidget(page);
     };
 
     auto hidePanel = [&]() {
-        ui->leftPanel->setVisible(false);
+        ui->leftPanel_2->setVisible(false);
     };
 
     // 탭 버튼 초기 설정 (Mode 탭은 UI에서 제거/숨김을 권장)
@@ -44,7 +44,7 @@ MainWindow::MainWindow(QWidget *parent)
         tabBtn->setAutoExclusive(false);
 
         connect(tabBtn, &QToolButton::clicked, this, [=]() {
-            bool panelVisible = ui->leftPanel->isVisible();
+            bool panelVisible = ui->leftPanel_2->isVisible();
             bool samePage = (ui->leftStack->currentWidget() == pageWidget);
 
             if (panelVisible && samePage) {
@@ -110,7 +110,6 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     initHeatmapLayer();
-
     // DB open/init
     db_.open(QDir::homePath() + "/wifi_qt.db");
     db_.initSchema();
@@ -136,19 +135,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->chkShowRobot, &QCheckBox::toggled, this, &MainWindow::onLayerRobot);
     connect(ui->chkShowApPins, &QCheckBox::toggled, this, &MainWindow::onLayerPins);
 
-    // AutoExplore
     connect(ui->chkAutoExplore, &QCheckBox::toggled,
             this, &MainWindow::onAutoExploreToggled);
 
-    // Session / Measure / Filter
     connect(ui->btnSessionRefresh, &QPushButton::clicked, this, &MainWindow::onSessionRefresh);
     connect(ui->btnSessionLoad,    &QPushButton::clicked, this, &MainWindow::onSessionLoad);
     connect(ui->btnSessionDelete,  &QPushButton::clicked, this, &MainWindow::onSessionDelete);
 
-    //connect(ui->btnMeasureStart, &QPushButton::clicked, this, &MainWindow::onMeasureStart);
-    //connect(ui->btnMeasureStop,  &QPushButton::clicked, this, &MainWindow::onMeasureStop);
-//========================
-    // 1버튼 토글: checkable 쓰지 않음
     ui->btnMeasureStart->setCheckable(false);
     ui->btnMeasureStart->setText("Start");
 
@@ -173,22 +166,6 @@ MainWindow::MainWindow(QWidget *parent)
         });
     });
 
-
-    // connect(ui->btnMeasureStart, &QPushButton::clicked, this, [this]() {
-    //     if (!measuringDb_) {
-    //         onMeasureStart();                 // DB 저장 시작 + 세션 생성
-    //     } else {
-    //         onMeasureStop();                  // DB 저장 종료
-    //     }
-
-    //     // 클릭 후 눌림 잔상 제거(테마/스타일에 따라 필요)
-    //     ui->btnMeasureStart->setDown(false);
-    //     ui->btnMeasureStart->setChecked(false);
-    //     ui->btnMeasureStart->clearFocus();
-
-    //     // 텍스트 동기화
-    //     ui->btnMeasureStart->setText(measuringDb_ ? "Stop" : "Start");
-    // });
 
     if (ui->btnMeasureStart) {
         ui->btnMeasureStart->setEnabled(true);
@@ -497,12 +474,7 @@ void MainWindow::initHeatmapLayer()
     const bool cap01 = true;
 
     delete heatMapper_;
-    heatMapper_ = new HeatMapper(&heatCanvas_, palette_, radius_px, 160,
-                                 /*absoluteMode=*/true,
-                                 /*cap01=*/true,
-                                 /*useSaturCurve=*/true,
-                                 /*saturK=*/1.5);
-
+    heatMapper_ = new HeatMapper(&heatCanvas_, palette_, radius_px, opacity, absoluteMode, cap01);
 
     if (!heatItem_) {
         heatItem_ = scene->addPixmap(QPixmap::fromImage(heatCanvas_));
@@ -572,8 +544,6 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev)
 
         auto* me = static_cast<QMouseEvent*>(ev);
         const QPointF scenePos = ui->graphicsView->mapToScene(me->pos());
-
-        // Mode 버튼 제거 후: Sim은 chkSimEnable 하나로 컨텍스트 결정
         const bool simCtx = ui->chkSimEnable->isChecked();
         const bool simGesture = (me->button() == Qt::RightButton) ||
                                 (me->button() == Qt::LeftButton && (me->modifiers() & Qt::ShiftModifier));
@@ -1057,7 +1027,7 @@ void MainWindow::initLegendOverlay()
     if (!ui->graphicsView) return;
     if (legendOverlay_) return;
 
-    // ✅ graphicsView의 viewport 위에 직접 올리면 오버레이처럼 동작
+    // graphicsView의 viewport 위에 직접 올리면 오버레이처럼 동작
     legendOverlay_ = new LegendBarWidget(ui->graphicsView->viewport());
     legendOverlay_->setRangeDbm(-80, 0);
     legendOverlay_->setTitle("Voice + Data | dBm");

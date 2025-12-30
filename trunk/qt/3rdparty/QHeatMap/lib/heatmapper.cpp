@@ -4,22 +4,16 @@
 #include <QPainter>
 #include <QRadialGradient>
 #include <QDebug>
-#include <cmath>
 #include "gradientpalette.h"
 
 HeatMapper::HeatMapper(QImage *image, GradientPalette *palette,
                        int radius, int opacity,
-                       bool absoluteMode,
-                       bool cap01,
-                       bool useSaturCurve,
-                       double saturK)
+                       bool absoluteMode, bool cap01)
     : radius_(radius),
     opacity_(opacity),
     max_(1.0),
     absoluteMode_(absoluteMode),
-    cap01_(cap01),
-    useSaturCurve_(useSaturCurve),
-    saturK_(saturK)
+    cap01_(cap01)
 {
     Q_ASSERT(image);
     Q_ASSERT(palette);
@@ -47,27 +41,17 @@ HeatMapper::~HeatMapper()
 qreal HeatMapper::increase(int x, int y, qreal delta)
 {
     int index = (y - 1) * width_ + (x - 1);
-    if (delta < 0.0) delta = 0.0;
+    qreal v = data_[index] + delta;
 
-    data_[index] += delta;     // ✅ 누적합(0~∞)
+    // 절대모드에서 누적을 0~1로 포화하면 색 의미가 유지됨(추천)
+    if (cap01_) {
+        if (v < 0.0) v = 0.0;
+        if (v > 1.0) v = 1.0;
+    }
+
+    data_[index] = v;
     return data_[index];
 }
-
-
-// qreal HeatMapper::increase(int x, int y, qreal delta)
-// {
-//     int index = (y - 1) * width_ + (x - 1);
-//     qreal v = data_[index] + delta;
-
-//     // 절대모드에서 누적을 0~1로 포화하면 색 의미가 유지됨(추천)
-//     if (cap01_) {
-//         if (v < 0.0) v = 0.0;
-//         if (v > 1.0) v = 1.0;
-//     }
-
-//     data_[index] = v;
-//     return data_[index];
-// }
 
 void HeatMapper::addPoint(int x, int y)
 {
@@ -112,26 +96,17 @@ void HeatMapper::redraw()
     colorize();
 }
 
-
 void HeatMapper::drawAlpha(int x, int y, qreal count, bool colorize_now)
 {
     qreal ratio = 0.0;
 
     if (absoluteMode_) {
-        if (useSaturCurve_) {
-            // ✅ 누적합 count를 0~1로 포화 변환
-            // ratio = 1 - exp(-k * sum)
-            const qreal k = (saturK_ > 0.0) ? saturK_ : 1.0;
-            ratio = 1.0 - std::exp(-k * count);
-        } else {
-            // 절대모드 + 단순 cap
-            ratio = count;
-        }
-
+        // ✅ 절대모드: count 자체가 0~1 스케일이라고 보고 사용
+        ratio = count;
         if (ratio < 0.0) ratio = 0.0;
-        if (ratio > 1.0) ratio = 1.0; // cap01 의미 유지
+        if (ratio > 1.0) ratio = 1.0;
     } else {
-        // 기존 상대모드(원하면 유지)
+        // 기존 상대모드: max_ 대비 정규화
         ratio = (max_ > 0.0) ? (count / max_) : 0.0;
         if (ratio < 0.0) ratio = 0.0;
         if (ratio > 1.0) ratio = 1.0;
@@ -151,7 +126,6 @@ void HeatMapper::drawAlpha(int x, int y, qreal count, bool colorize_now)
     if (colorize_now)
         colorize(x, y);
 }
-
 
 void HeatMapper::colorize()
 {

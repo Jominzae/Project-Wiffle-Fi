@@ -155,6 +155,7 @@ private:
     QGraphicsPixmapItem* heatItem_ = nullptr;
     QTimer* heatFlushTimer_ = nullptr;
     LegendBarWidget* legendOverlay_ = nullptr;
+
     void initLegendOverlay();
     void updateLegendOverlayGeometry();
 };

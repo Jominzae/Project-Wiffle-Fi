@@ -28,10 +28,9 @@ bool HeatLayer::init(QGraphicsScene* scene, const QSize& size, int z,
     palette_->setColorAt(1.0, QColor(0, 255, 0));
 
     delete mapper_;
-    // mapper_ = new HeatMapper(&canvas_, palette_, /*radius=*/radius_px, /*opacity=*/opacity);
-    mapper_ = new HeatMapper(&canvas_, palette_, radius_px, opacity,
-                             true, true, true, 1.5);
-
+    const bool absoluteMode = true;
+    const bool cap01 = true;
+    mapper_ = new HeatMapper(&canvas_, palette_, radius_px, opacity, absoluteMode, cap01);
 
     if (!item_) {
         item_ = scene->addPixmap(QPixmap::fromImage(canvas_));

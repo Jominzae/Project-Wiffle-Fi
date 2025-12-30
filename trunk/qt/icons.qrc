@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file>icons/refresh-icon.svg</file>
+        <file>icons/pin-svgrepo-com.svg</file>
+        <file>icons/layer-group-svgrepo-com.svg</file>
+        <file>icons/icons8-cursor.svg</file>
+        <file>icons/db-svgrepo-com.svg</file>
+    </qresource>
+</RCC>

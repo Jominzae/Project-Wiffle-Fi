@@ -22,6 +22,7 @@ python3 -m proj_wifi_heatmap_rl.train_dqn --resume runs_dqn/dqn_ep0800.pt --more
 
 ```bash
 python3 -m proj_wifi_heatmap_rl.test_dqn_policy --ckpt runs_dqn/dqn_ep0800.pt
+python3 -m proj_wifi_heatmap_rl.test_dqn_policy --ckpt runs_dqn/dqn_ep0800.pt --done
 python3 -m proj_wifi_heatmap_rl.test_dqn_policy --ckpt runs_dqn/dqn_ep0800.pt --episodes 1 --sleep 0.05
 ```
 

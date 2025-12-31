@@ -204,6 +204,7 @@ def main():
     parser.add_argument("--total-episodes", type=int, default=0,
                     help="override total episodes (absolute)")
     parser.add_argument("--reset-optim", action="store_true", help="do not load optimizer state")
+    parser.add_argument("--reset-best-record", action="store_true")
     args = parser.parse_args()
 
     hp = HParams()
@@ -265,6 +266,10 @@ def main():
 
         best_average_R = ckpt.get("best_average_R", -float("inf"))
         best_average_N = ckpt.get("best_average_N", -float("inf"))
+        
+        if args.reset_best_record:
+            best_average_R = 0.0
+            best_average_N = 0.0
 
         if args.total_episodes > 0:
             end_episode = args.total_episodes

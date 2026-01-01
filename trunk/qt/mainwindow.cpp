@@ -1,26 +1,227 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
+#include "rosworker.h"          // your RosWorker class
+#include "legendbarwidget.h"    // your legend widget
+
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
-#include <QPixmap>
 #include <QDebug>
 #include <QResizeEvent>
-#include <QMouseEvent>
 #include <QShowEvent>
-#include <QDateTime>
+#include <QMouseEvent>
+#include <QStatusBar>
+#include <QtMath>
 #include <cmath>
 
 static inline double rad2deg(double r) { return r * 180.0 / M_PI; }
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
+    : QMainWindow(parent),
+    ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
 
-    // ===== graphics =====
+    // ===== Graphics =====
+    initGraphics();
+
+    // ===== Load map =====
+    const QString yamlPath = "../../../../docs/maps/map.yaml";
+    if (!loadStaticMap(yamlPath)) {
+        qDebug() << "Failed to load map yaml:" << yamlPath;
+    } else {
+        mapReady_ = true;
+    }
+
+    // ===== Heat layers init ( live/query/sim) =====
+    initHeatLayers();
+
+    // ===== Legend =====
+    initLegendOverlay();
+
+    // ===== SSID combo =====
+    if (ui->cbSsid) {
+        ui->cbSsid->clear();
+        ui->cbSsid->addItem("ALL");
+        ssidSetLive_.clear();
+        ssidSetLive_.insert("ALL");
+    }
+
+    // ===== Session combo =====
+    if (ui->cbSessionId) {
+        ui->cbSessionId->clear();
+        ui->cbSessionId->setEditable(true);
+        ui->cbSessionId->addItem("(start to create session)", "");
+    }
+
+    // ===== Left panel toggle + page switch (by objectName) =====
+    // 요구사항: 버튼 누르면 열림/이동, 다시 누르면 닫힘. autoExclusive는 사용하지 않음(기본 false 유지).
+
+    auto setLeftPanelVisible = [this](bool visible){
+        if (!ui->leftPanel_2) return;
+        ui->leftPanel_2->setVisible(visible);
+        // 패널이 열리고 닫힐 때 레이아웃이 깨지는 경우, 필요하면 아래 한 줄 추가 가능
+        // ui->centralwidget->updateGeometry();
+    };
+
+    auto switchLeftByName = [this](const QString& name){
+        if (!ui->leftStack) return;
+        QWidget* w = ui->leftStack->findChild<QWidget*>(name);
+        if (!w) return;
+        ui->leftStack->setCurrentWidget(w);
+    };
+
+    // 다른 버튼을 끄는 함수(블록으로 재귀 방지)
+    auto uncheckOthers = [this](QToolButton* keep){
+        const QList<QToolButton*> btns = { ui->tbSession, ui->tbSim, ui->tbLayers };
+        for (auto* b : btns) {
+            if (!b || b == keep) continue;
+            QSignalBlocker blocker(b);
+            b->setChecked(false);
+        }
+    };
+
+    // 패널 닫기(모든 버튼 OFF + 패널 hide)
+    auto closeLeftPanel = [this, setLeftPanelVisible](){
+        // 버튼 상태 OFF
+        if (ui->tbSession) { QSignalBlocker b(ui->tbSession); ui->tbSession->setChecked(false); }
+        if (ui->tbSim)     { QSignalBlocker b(ui->tbSim);     ui->tbSim->setChecked(false); }
+        if (ui->tbLayers)  { QSignalBlocker b(ui->tbLayers);  ui->tbLayers->setChecked(false); }
+
+        // 패널 숨김
+        setLeftPanelVisible(false);
+    };
+
+    // autoExclusive는 쓰지 않으므로, checkable만 확실히 설정
+    if (ui->tbSession) { ui->tbSession->setCheckable(true); ui->tbSession->setAutoExclusive(false); }
+    if (ui->tbSim)     { ui->tbSim->setCheckable(true);     ui->tbSim->setAutoExclusive(false); }
+    if (ui->tbLayers)  { ui->tbLayers->setCheckable(true);  ui->tbLayers->setAutoExclusive(false); }
+
+    //  버튼 토글 로직
+    if (ui->tbSession) {
+        connect(ui->tbSession, &QToolButton::toggled, this, [=](bool on){
+            if (on) {
+                uncheckOthers(ui->tbSession);
+                setLeftPanelVisible(true);
+                switchLeftByName("pageSession");
+            } else {
+                // 이 버튼이 꺼지는 순간, 다른 버튼도 다 꺼져있다면 패널 닫기
+                const bool anyOn = (ui->tbSim && ui->tbSim->isChecked()) || (ui->tbLayers && ui->tbLayers->isChecked());
+                if (!anyOn) closeLeftPanel();
+            }
+        });
+    }
+
+    if (ui->tbSim) {
+        connect(ui->tbSim, &QToolButton::toggled, this, [=](bool on){
+            if (on) {
+                uncheckOthers(ui->tbSim);
+                setLeftPanelVisible(true);
+                switchLeftByName("pageSim");
+            } else {
+                const bool anyOn = (ui->tbSession && ui->tbSession->isChecked()) || (ui->tbLayers && ui->tbLayers->isChecked());
+                if (!anyOn) closeLeftPanel();
+            }
+        });
+    }
+
+    if (ui->tbLayers) {
+        connect(ui->tbLayers, &QToolButton::toggled, this, [=](bool on){
+            if (on) {
+                uncheckOthers(ui->tbLayers);
+                setLeftPanelVisible(true);
+                switchLeftByName("pageLayers");
+            } else {
+                const bool anyOn = (ui->tbSession && ui->tbSession->isChecked()) || (ui->tbSim && ui->tbSim->isChecked());
+                if (!anyOn) closeLeftPanel();
+            }
+        });
+    }
+
+    //  디폴트: autoExclusive 비활성 + 패널은 닫힌 상태로 시작(원하는 경우)
+    closeLeftPanel();
+    applyViewTransform();
+
+
+    // ===== ROS worker =====
+    rosThread = new RosWorker(this);
+
+    connect(rosThread, &RosWorker::statusChanged, this, &MainWindow::onRosStatus);
+    connect(rosThread, &RosWorker::robotPose,     this, &MainWindow::onRobotPose);
+    connect(rosThread, &RosWorker::fusedSample,   this, &MainWindow::onFusedSample);
+    connect(rosThread, &RosWorker::startSessionReply, this, &MainWindow::onStartSessionReply);
+    connect(rosThread, &RosWorker::stopSessionReply,  this, &MainWindow::onStopSessionReply);
+    connect(rosThread, &RosWorker::heatmapReplyArrived, this, &MainWindow::onHeatmapReplyArrived);
+    connect(rosThread, &RosWorker::listSessionsReply, this, &MainWindow::onListSessionsReply);
+    connect(rosThread, &RosWorker::listSsidsReply, this, &MainWindow::onListSsidsReply);
+
+    rosThread->start();
+
+    // ===== UI connects =====
+    connect(ui->chkShowHeatmap, &QCheckBox::toggled, this, &MainWindow::onLayerHeatmap);
+    connect(ui->chkShowRobot,   &QCheckBox::toggled, this, &MainWindow::onLayerRobot);
+    connect(ui->chkShowApPins,  &QCheckBox::toggled, this, &MainWindow::onLayerPins);
+
+    connect(ui->btnApplyFilter, &QPushButton::clicked, this, &MainWindow::onApplyFilter);
+
+    // Start/Stop toggle (버튼 눌림 유지 방지)
+    if (ui->btnMeasureStart) {
+        ui->btnMeasureStart->setCheckable(false); // 눌림 유지 방지
+        ui->btnMeasureStart->setText("Start");
+        connect(ui->btnMeasureStart, &QPushButton::clicked,
+                this, &MainWindow::onMeasureToggle);
+    }
+
+    if (ui->btnQueryClear) {
+        connect(ui->btnQueryClear, &QPushButton::clicked, this, &MainWindow::onQueryClear);
+    }
+
+    // Refresh 버튼
+    if (ui->btnSessionRefresh) {
+        connect(ui->btnSessionRefresh, &QPushButton::clicked,
+                this, &MainWindow::onSessionRefresh);
+    }
+
+    // 세션 콤보 변경 시 ListSsid 호출
+    if (ui->cbSessionId) {
+        connect(ui->cbSessionId,
+                QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this,
+                &MainWindow::onSessionComboChanged);
+    }
+
+
+    updateUiByContext();
+
+    // 앱 시작 시 자동 refresh
+    QTimer::singleShot(0, this, [this](){ onSessionRefresh(); });
+}
+
+MainWindow::~MainWindow()
+{
+    if (rosThread) {
+        rosThread->requestInterruption();
+        rosThread->wait();
+        // rosThread owned by Qt parent(this) -> auto delete
+    }
+
+    if (heatFlushTimer_) {
+        heatFlushTimer_->stop();
+        delete heatFlushTimer_;
+        heatFlushTimer_ = nullptr;
+    }
+
+    if (legendPosTimer_) {
+        legendPosTimer_->stop();
+    }
+    // legendOverlay_ is child of viewport, will be deleted by Qt parent chain
+
+    delete ui;
+}
+
+void MainWindow::initGraphics()
+{
     scene = new QGraphicsScene(this);
     ui->graphicsView->setScene(scene);
     ui->graphicsView->viewport()->installEventFilter(this);
@@ -32,78 +233,16 @@ MainWindow::MainWindow(QWidget *parent)
     robotItem->setZValue(10);
     robotItem->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     robotItem->setVisible(false);
-
-    // =======================
-    // Load static map
-    // =======================
-    const QString yamlPath = "../../docs/maps/map.yaml";
-    if (!loadStaticMap(yamlPath)) {
-        qDebug() << "Failed to load map yaml:" << yamlPath;
-    } else {
-        mapReady_ = true;
-    }
-
-    // ===== heatmaps init =====
-    initLiveHeatmap();
-    initQueryHeatmap();
-
-    // ===== ROS worker =====
-    rosThread = new RosWorker(this);
-    connect(rosThread, &RosWorker::statusChanged, this, &MainWindow::onRosStatus);
-    connect(rosThread, &RosWorker::robotPose,     this, &MainWindow::onRobotPose);
-    connect(rosThread, &RosWorker::fusedSample,   this, &MainWindow::onFusedSample);
-    connect(rosThread, &RosWorker::heatmapReplyArrived, this, &MainWindow::onHeatmapReplyArrived);
-    rosThread->start();
-
-    // ===== UI connects =====
-    if (ui->chkShowHeatmap) connect(ui->chkShowHeatmap, &QCheckBox::toggled, this, &MainWindow::onLayerHeatmap);
-    if (ui->chkShowRobot)   connect(ui->chkShowRobot,   &QCheckBox::toggled, this, &MainWindow::onLayerRobot);
-
-    if (ui->btnQueryClear) connect(ui->btnQueryClear, &QPushButton::clicked, this, &MainWindow::onQueryClear);
-    if (ui->btnApplyFilter) connect(ui->btnApplyFilter, &QPushButton::clicked, this, &MainWindow::onApplyFilter);
-
-    // 세션 목록 “refresh”는 지금 단계에서는 DB 서비스가 따로 list를 안 주므로
-    // UI에서 cbSessionId가 이미 채워진다고 가정하거나, 팀에서 list 서비스를 별도로 붙이면 됩니다.
-    // 여기서는 버튼이 눌리면 화면 메시지만 갱신.
-    if (ui->btnSessionRefresh) connect(ui->btnSessionRefresh, &QPushButton::clicked, this, &MainWindow::onSessionRefresh);
-
-    // 기본 필터값
-    if (ui->cbSsid && ui->cbSsid->count() == 0) ui->cbSsid->addItem("ALL");
-
-    applyLayersPolicy();
-}
-
-MainWindow::~MainWindow()
-{
-    if (rosThread) {
-        rosThread->requestInterruption();
-        rosThread->wait();
-    }
-
-    delete liveFlushTimer_;
-    liveFlushTimer_ = nullptr;
-
-    delete liveMapper_;
-    liveMapper_ = nullptr;
-    delete livePalette_;
-    livePalette_ = nullptr;
-
-    delete queryMapper_;
-    queryMapper_ = nullptr;
-    delete queryPalette_;
-    queryPalette_ = nullptr;
-
-    delete ui;
 }
 
 void MainWindow::onRosStatus(const QString &msg)
 {
     qDebug() << msg;
-    statusBar()->showMessage(msg);
+    statusBar()->showMessage(msg, 2000);
 }
 
 // ======================
-// Map load/parse
+// Map load
 // ======================
 bool MainWindow::loadStaticMap(const QString &yamlPath)
 {
@@ -159,10 +298,11 @@ bool MainWindow::parseMapYaml(const QString &yamlPath, MapMeta &out)
 // ======================
 // View transform
 // ======================
-void MainWindow::resizeEvent(QResizeEvent* e)
+void MainWindow::resizeEvent(QResizeEvent* event)
 {
-    QMainWindow::resizeEvent(e);
+    QMainWindow::resizeEvent(event);
     applyViewTransform();
+    updateLegendOverlayGeometry();
 }
 
 void MainWindow::showEvent(QShowEvent* e)
@@ -170,6 +310,7 @@ void MainWindow::showEvent(QShowEvent* e)
     QMainWindow::showEvent(e);
     QTimer::singleShot(0, this, [this]{
         applyViewTransform();
+        updateLegendOverlayGeometry();
     });
 }
 
@@ -179,6 +320,7 @@ void MainWindow::applyViewTransform()
     if (scene->sceneRect().isEmpty()) return;
 
     auto* v = ui->graphicsView;
+
     v->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
     v->setResizeAnchor(QGraphicsView::AnchorViewCenter);
     v->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -188,7 +330,7 @@ void MainWindow::applyViewTransform()
     v->resetTransform();
     v->fitInView(scene->sceneRect(), Qt::KeepAspectRatio);
 
-    // 기존 프로젝트처럼 -90 회전 유지
+    // 기존 프로젝트 정책(회전 -90)
     QTransform t = v->transform();
     t.rotate(-90.0);
     v->setTransform(t, false);
@@ -277,11 +419,77 @@ bool MainWindow::sceneToMapPixel(const QPointF& scenePos, int& px, int& py) cons
 }
 
 // ======================
+// Heat layers init ( live/query/sim)
+// ======================
+void MainWindow::initHeatLayers()
+{
+    if (!mapReady_ || mapImageSize_.isEmpty() || !scene) return;
+
+    const int rpx = qMax(1, int(std::round(0.25 / mapMeta_.resolution)));
+    const int opacity = 160;
+
+    // live layer (z=5)
+    liveLayer_.init(scene, mapImageSize_, /*z=*/5, rpx, opacity);
+    liveLayer_.setVisible(true);
+
+    // query layer (z=6)
+    queryLayer_.init(scene, mapImageSize_, /*z=*/6, rpx, opacity);
+    queryLayer_.setVisible(false);
+
+    // sim layer (z=7)
+    simLayer_.init(scene, mapImageSize_, /*z=*/7, rpx, opacity);
+    simLayer_.setVisible(false);
+
+    // flush timer: 평균 렌더는 100ms에 한 번
+    if (!heatFlushTimer_) {
+        heatFlushTimer_ = new QTimer(this);
+        connect(heatFlushTimer_, &QTimer::timeout, this, [this](){
+            // Query 모드에서는 live를 숨기므로, live flush는 해도 되지만 비용 아끼려면 조건으로
+            if (loadedSessionId_.isEmpty() && ui->chkShowHeatmap->isChecked()) {
+                liveLayer_.flushMean();
+            } else {
+                // 그래도 탐사중 데이터는 계속 누적될 수 있으니,
+                // 필요하면 여기서도 flushMean() 호출 가능.
+            }
+        });
+        heatFlushTimer_->start(100);
+    }
+}
+
+float MainWindow::rssiToIntensity01(float rssi) const
+{
+    if (rssi < -90.f) rssi = -90.f;
+    if (rssi > -30.f) rssi = -30.f;
+    return (rssi + 90.f) / 60.f;
+}
+
+void MainWindow::updateSsidComboLive(const QString& ssid)
+{
+    if (!ui->cbSsid) return;
+    if (ssid.isEmpty()) return;
+    if (ssidSetLive_.contains(ssid)) return;
+
+    ssidSetLive_.insert(ssid);
+    ui->cbSsid->addItem(ssid);
+}
+
+void MainWindow::addLivePointMean(double x_m, double y_m, int rssi)
+{
+    if (!mapReady_ || !liveLayer_.isReady()) return;
+
+    int px=0, py=0;
+    if (!meterToPixel(x_m, y_m, px, py)) return;
+
+    // HeatMapper는 1-based를 쓰는 기존 정책 유지
+    liveLayer_.addPointMean(px + 1, py + 1, rssiToIntensity01((float)rssi));
+}
+
+// ======================
 // Robot pose
 // ======================
 void MainWindow::onRobotPose(double x, double y, double yaw)
 {
-    if (!mapReady_) return;
+    if (!mapReady_ || !robotItem) return;
 
     int px=0, py=0;
     if (!meterToPixel(x, y, px, py)) return;
@@ -289,189 +497,218 @@ void MainWindow::onRobotPose(double x, double y, double yaw)
     robotItem->setPos(QPointF(px, py));
     robotItem->setRotation(-rad2deg(yaw));
 
-    if (!poseReady_) poseReady_ = true;
-    robotItem->setVisible(ui->chkShowRobot && ui->chkShowRobot->isChecked());
+    if (!poseReady_) {
+        poseReady_ = true;
+        robotItem->setVisible(ui->chkShowRobot->isChecked() && poseReady_);
+    }
 }
 
 // ======================
-// Heatmap utils
+// Live fused sample ->  전체 SSID 평균 히트맵
 // ======================
-int MainWindow::brushRadiusPx() const
-{
-    const double r_m = 0.25; // 25cm
-    return qMax(1, int(std::round(r_m / mapMeta_.resolution)));
-}
-
-float MainWindow::rssiToIntensity01(float rssi) const
-{
-    // 연속형 정규화 (원하면 3단계 양자화로 바꿔도 됨)
-    if (rssi < -90.f) rssi = -90.f;
-    if (rssi > -30.f) rssi = -30.f;
-    return (rssi + 90.f) / 60.f;
-}
-
-// ======================
-// Live heatmap (from /wifi/fused)
-// ======================
-void MainWindow::initLiveHeatmap()
-{
-    if (!mapReady_ || mapImageSize_.isEmpty() || !scene) return;
-
-    liveCanvas_ = QImage(mapImageSize_, QImage::Format_ARGB32);
-    liveCanvas_.fill(Qt::transparent);
-
-    livePalette_ = new GradientPalette(256);
-    livePalette_->setColorAt(0.0, QColor(255, 0, 0));
-    livePalette_->setColorAt(0.5, QColor(255, 255, 0));
-    livePalette_->setColorAt(1.0, QColor(0, 255, 0));
-
-    liveMapper_ = new HeatMapper(&liveCanvas_, livePalette_, brushRadiusPx(), 160, true, true);
-
-    liveHeatItem = scene->addPixmap(QPixmap::fromImage(liveCanvas_));
-    liveHeatItem->setZValue(5);
-    liveHeatItem->setPos(0, 0);
-
-    liveFlushTimer_ = new QTimer(this);
-    connect(liveFlushTimer_, &QTimer::timeout, this, &MainWindow::flushLiveHeatmap);
-    liveFlushTimer_->start(100);
-}
-
-void MainWindow::flushLiveHeatmap()
-{
-    if (!liveMapper_ || !liveHeatItem) return;
-    liveMapper_->colorize();
-    liveHeatItem->setPixmap(QPixmap::fromImage(liveCanvas_));
-}
-
 void MainWindow::onFusedSample(double x_m, double y_m, const QString& ssid, int rssi)
 {
-    if (!mapReady_ || !liveMapper_) return;
-    if (!accumulating_) return; // Start/Stop 정책
+    if (!mapReady_ || !liveLayer_.isReady()) return;
 
-    // Live에도 필터 적용(원치 않으면 이 2줄 제거)
+    // SSID 리스트 실시간 갱신
+    updateSsidComboLive(ssid);
+
+    // Start(누적 ON)일 때만 live heatmap에 반영
+    if (!accumulating_) return;
+
+    // live는 “전체 평균”이지만, 사용자가 필터를 걸어보고 싶다면 유지 가능(원하면 제거)
     if (!filterSsid_.isEmpty() && filterSsid_ != "ALL" && ssid != filterSsid_) return;
     if (filterThrEnable_ && rssi < filterThrRssi_) return;
 
-    int px=0, py=0;
-    if (!meterToPixel(x_m, y_m, px, py)) return;
-
-    liveMapper_->addPoint(px + 1, py + 1, rssiToIntensity01((float)rssi));
+    addLivePointMean(x_m, y_m, rssi);
 }
 
 // ======================
-// Query heatmap (from /db/get_heatmap)
+// Session Start/Stop (Trigger)
 // ======================
-void MainWindow::initQueryHeatmap()
+// void MainWindow::onMeasureToggle()
+// {
+//     if (!rosThread) return;
+
+//     // Start
+//     if (!accumulating_) {
+//         if (sessionPending_) return;
+//         sessionPending_ = true;
+
+//         //  즉시 UI를 Stop 상태처럼 보이게
+//         startOptimistic_ = true;
+//         if (ui->btnMeasureStart) {
+//             ui->btnMeasureStart->setText("Stop");
+//             ui->btnMeasureStart->setEnabled(false); // 응답 올 때까지 잠깐 잠금
+//         }
+//         statusBar()->showMessage("Starting session...");
+
+//         rosThread->requestStartSession();
+//         return;
+//     }
+
+//     // Stop
+//     accumulating_ = false;
+//     startOptimistic_ = false;
+//     updateUiByContext();
+//     applyLayersPolicy();
+
+//     rosThread->requestStopSession();
+//     statusBar()->showMessage("Stopping session...");
+// }
+void MainWindow::onMeasureToggle()
 {
-    if (!mapReady_ || mapImageSize_.isEmpty() || !scene) return;
+    if (!rosThread || !ui->btnMeasureStart) return;
 
-    queryCanvas_ = QImage(mapImageSize_, QImage::Format_ARGB32);
-    queryCanvas_.fill(Qt::transparent);
+    if (sessionPending_) return; // 중복 클릭 방지
 
-    queryPalette_ = new GradientPalette(256);
-    queryPalette_->setColorAt(0.0, QColor(255, 0, 0));
-    queryPalette_->setColorAt(0.5, QColor(255, 255, 0));
-    queryPalette_->setColorAt(1.0, QColor(0, 255, 0));
+    const QString curText = ui->btnMeasureStart->text().trimmed();
 
-    queryMapper_ = new HeatMapper(&queryCanvas_, queryPalette_, brushRadiusPx(), 160, true, true);
+    // 1) Start 텍스트가 보이면 -> Start 기능 실행 + 즉시 Stop으로 바꾸기
+    if (curText.compare("Start", Qt::CaseInsensitive) == 0) {
 
-    queryHeatItem = scene->addPixmap(QPixmap::fromImage(queryCanvas_));
-    queryHeatItem->setZValue(6);
-    queryHeatItem->setPos(0, 0);
-    queryHeatItem->setVisible(false);
-}
+        sessionPending_ = true;
+        pendingStartUi_ = true;
+        pendingStopUi_  = false;
 
-void MainWindow::flushQueryHeatmap()
-{
-    if (!queryMapper_ || !queryHeatItem) return;
-    queryMapper_->colorize();
-    queryHeatItem->setPixmap(QPixmap::fromImage(queryCanvas_));
-}
+        //  즉시 UI 변경 (요구사항)
+        ui->btnMeasureStart->setText("Stop");
+        ui->btnMeasureStart->setEnabled(false);
+        statusBar()->showMessage("Starting session...");
 
-void MainWindow::clearQueryHeatmap()
-{
-    if (queryCanvas_.isNull()) return;
-    queryCanvas_.fill(Qt::transparent);
-    flushQueryHeatmap();
-    if (queryHeatItem) queryHeatItem->setVisible(false);
-}
-
-// ======================
-// UI actions
-// ======================
-void MainWindow::onLayerHeatmap(bool)
-{
-    applyLayersPolicy();
-}
-
-void MainWindow::onLayerRobot(bool)
-{
-    if (!robotItem) return;
-    robotItem->setVisible(ui->chkShowRobot && ui->chkShowRobot->isChecked());
-}
-
-void MainWindow::onSessionRefresh()
-{
-    // 지금 단계에서는 “세션 리스트”를 DB에서 직접 뽑지 않음(요구사항: 과거는 DB 서비스)
-    // -> 팀에서 list_sessions 서비스를 추가하거나, UI에서 미리 채운다고 가정
-    statusBar()->showMessage("Session refresh: UI list is assumed (no direct DB access).");
-}
-
-void MainWindow::on_btnSessionLoad_clicked()
-{
-    if (!ui->cbSessionId) return;
-
-    const QString sid = ui->cbSessionId->currentData().toString().isEmpty()
-                            ? ui->cbSessionId->currentText()
-                            : ui->cbSessionId->currentData().toString();
-
-    if (sid.isEmpty()) {
-        statusBar()->showMessage("Load failed: empty session_id");
+        // 실제 기능 실행
+        rosThread->requestStartSession();
         return;
     }
 
-    currentSessionId_ = sid;
-    queryOffset_ = 0;
-    requestPastHeatmap();
-    applyLayersPolicy();
-}
+    // 2) Stop 텍스트가 보이면 -> Stop 기능 실행 + 즉시 Start로 바꾸기
+    if (curText.compare("Stop", Qt::CaseInsensitive) == 0) {
 
-void MainWindow::onQueryClear()
-{
-    currentSessionId_.clear();
-    clearQueryHeatmap();
-    applyLayersPolicy();
-    statusBar()->showMessage("Query cleared (back to live).");
-}
+        sessionPending_ = true;
+        pendingStopUi_  = true;
+        pendingStartUi_ = false;
 
-void MainWindow::onApplyFilter()
-{
-    filterSsid_ = (ui->cbSsid ? ui->cbSsid->currentText() : "ALL");
-    filterThrEnable_ = (ui->chkThrEnable ? ui->chkThrEnable->isChecked() : false);
-    filterThrRssi_ = (ui->cbThr ? ui->cbThr->currentText().toInt() : -70);
+        //  즉시 UI 변경 (요구사항)
+        ui->btnMeasureStart->setText("Start");
+        ui->btnMeasureStart->setEnabled(false);
+        statusBar()->showMessage("Stopping session...");
 
-    // 과거 모드면 즉시 재요청
-    if (!currentSessionId_.isEmpty()) {
-        queryOffset_ = 0;
-        requestPastHeatmap();
+        // 실제 기능 실행
+        rosThread->requestStopSession();
+        return;
     }
 
-    statusBar()->showMessage(QString("Filter: ssid=%1 thr=%2")
-                                 .arg(filterSsid_).arg(filterThrRssi_));
+    // 예상치 못한 텍스트면 안전하게 복구
+    ui->btnMeasureStart->setText(accumulating_ ? "Stop" : "Start");
 }
 
-void MainWindow::requestPastHeatmap()
+
+void MainWindow::onStartSessionReply(bool ok, const QString& session_id_or_msg)
+{
+    sessionPending_ = false;
+    if (ui->btnMeasureStart) ui->btnMeasureStart->setEnabled(true);
+
+    if (!pendingStartUi_) {
+        // (혹시라도) start 응답이 왔는데 UI가 start-flow가 아니었다면 상태만 반영
+        if (ok) accumulating_ = true;
+        return;
+    }
+    pendingStartUi_ = false;
+
+    if (!ok) {
+        // ❌ start 실패 -> 즉시 바꿨던 텍스트를 원복
+        accumulating_ = false;
+        activeSessionId_.clear();
+        if (ui->btnMeasureStart) ui->btnMeasureStart->setText("Start");
+        statusBar()->showMessage("Start failed: " + session_id_or_msg, 3000);
+        return;
+    }
+
+    const QString sid = session_id_or_msg.trimmed();
+    if (sid.isEmpty()) {
+        accumulating_ = false;
+        activeSessionId_.clear();
+        if (ui->btnMeasureStart) ui->btnMeasureStart->setText("Start");
+        statusBar()->showMessage("Start failed: empty session_id", 3000);
+        return;
+    }
+
+    //  start 성공
+    accumulating_ = true;
+    activeSessionId_ = sid;
+
+    // (선택) 새 세션 시작 시 live heatmap 초기화
+    liveLayer_.clear(true);
+
+    statusBar()->showMessage("Session started: " + sid, 2000);
+
+    // start 직후 세션/SSID 갱신 원하면
+    onSessionRefresh();
+}
+
+
+void MainWindow::onStopSessionReply(bool ok, const QString& session_id_or_msg)
+{
+    sessionPending_ = false;
+    if (ui->btnMeasureStart) ui->btnMeasureStart->setEnabled(true);
+
+    if (!pendingStopUi_) {
+        if (ok) accumulating_ = false;
+        return;
+    }
+    pendingStopUi_ = false;
+
+    if (!ok) {
+        // stop 실패 -> 즉시 바꿨던 텍스트를 원복(Stop으로 돌아가야 함)
+        accumulating_ = true; // stop이 실패했으면 측정중으로 보는 게 자연스러움
+        if (ui->btnMeasureStart) ui->btnMeasureStart->setText("Stop");
+        statusBar()->showMessage("Stop failed: " + session_id_or_msg, 3000);
+        return;
+    }
+
+    //  stop 성공
+    accumulating_ = false;
+    activeSessionId_.clear();
+
+    statusBar()->showMessage("Session stopped: " + session_id_or_msg, 2000);
+
+    // (선택) stop 후 세션 목록 최신화
+    onSessionRefresh();
+}
+
+
+// ======================
+// Past(Query) heatmap load (GetHeatmap)
+// ======================
+void MainWindow::on_btnSessionLoad_clicked()
 {
     if (!rosThread) return;
-    if (currentSessionId_.isEmpty()) return;
+    if (!ui->cbSessionId) return;
 
-    const QString ssid = filterSsid_.isEmpty() ? "ALL" : filterSsid_;
-    rosThread->requestHeatmap(currentSessionId_,
-                              ssid,
-                              filterThrEnable_,
-                              filterThrRssi_,
-                              queryLimit_,
-                              queryOffset_);
+    const QString sid = ui->cbSessionId->currentData().toString().isEmpty()
+                            ? ui->cbSessionId->currentText().trimmed()
+                            : ui->cbSessionId->currentData().toString().trimmed();
+
+    if (sid.isEmpty() || sid.startsWith("(")) {
+        statusBar()->showMessage("Load failed: invalid session_id");
+        return;
+    }
+
+    loadedSessionId_ = sid;
+
+    const uint32_t limit  = 200000;
+    const uint32_t offset = 0;
+
+    statusBar()->showMessage(QString("Loading past heatmap: sid=%1 ...").arg(sid));
+
+    rosThread->requestHeatmap(
+        sid,
+        (filterSsid_.isEmpty() ? "ALL" : filterSsid_),
+        filterThrEnable_,
+        filterThrRssi_,
+        limit,
+        offset
+        );
 }
 
 void MainWindow::onHeatmapReplyArrived(bool ok,
@@ -483,60 +720,162 @@ void MainWindow::onHeatmapReplyArrived(bool ok,
                                        const QVector<double>& xs,
                                        const QVector<double>& ys,
                                        const QVector<int>& rssis,
-                                       const QVector<QString>& /*ssids*/,
-                                       const QVector<QString>& /*stamps*/)
+                                       const QVector<QString>&,
+                                       const QVector<QString>&)
 {
-    Q_UNUSED(session_id);
-    Q_UNUSED(ssid);
-    Q_UNUSED(thr_enable);
-    Q_UNUSED(thr_rssi);
-
     if (!ok) {
-        statusBar()->showMessage("Heatmap load failed: " + message);
+        statusBar()->showMessage("GetHeatmap failed: " + message);
         return;
     }
 
-    // query heatmap rebuild
-    if (!queryMapper_) return;
-    queryCanvas_.fill(Qt::transparent);
+    if (!queryLayer_.isReady() || !mapReady_) return;
 
-    const int n = qMin(xs.size(), ys.size());
+    //  Query 평균 히트맵: 통계 초기화 후 sum/cnt로 다시 계산
+    queryLayer_.clear(true);
+
+    const int n = qMin(xs.size(), qMin(ys.size(), rssis.size()));
     for (int i=0; i<n; ++i) {
-        int px=0, py=0;
-        if (!meterToPixel(xs[i], ys[i], px, py)) continue;
-        queryMapper_->addPoint(px + 1, py + 1, rssiToIntensity01((float)rssis[i]));
+        // int px=0, py=0;
+        // if (!meterToPixel(xs[i], ys[i], px, py)) continue;
+        // queryLayer_.addPointMean(px + 1, py + 1, rssiToIntensity01((float)rssis[i]));
+        // xs/ys는 grid/pixel 좌표라고 했으므로 그대로 사용
+        const int n = qMin(xs.size(), qMin(ys.size(), rssis.size()));
+        for (int i=0; i<n; ++i) {
+            const int px = (int)std::lround(xs[i]);   // 또는 (int)xs[i]
+            const int py = (int)std::lround(ys[i]);
+
+            // 맵 이미지 범위 체크
+            if (px < 0 || py < 0 || px >= mapImageSize_.width() || py >= mapImageSize_.height())
+                continue;
+
+            // HeatMapper가 1-based 좌표를 쓰는 정책이면 +1 유지
+            queryLayer_.addPointMean(px + 1, py + 1, rssiToIntensity01((float)rssis[i]));
+        }
+        queryLayer_.flushMean();
+        queryLayer_.setVisible(true);
     }
 
-    flushQueryHeatmap();
-    if (queryHeatItem) queryHeatItem->setVisible(true);
+    queryLayer_.flushMean();
+    queryLayer_.setVisible(true);
 
+    loadedSessionId_ = session_id;
+
+    // query가 live보다 우선
     applyLayersPolicy();
-    statusBar()->showMessage(QString("Loaded past heatmap: %1 points (%2)")
-                                 .arg(n).arg(message));
+
+    statusBar()->showMessage(
+        QString("Loaded past AVG heatmap rows=%1 (sid=%2, ssid=%3, thr=%4)")
+            .arg(n).arg(session_id).arg(ssid).arg(thr_enable ? thr_rssi : 0)
+        );
+}
+
+void MainWindow::onQueryClear()
+{
+    if (queryLayer_.isReady()) {
+        queryLayer_.clear(true);
+        queryLayer_.flushMean();
+        queryLayer_.setVisible(false);
+    }
+    loadedSessionId_.clear();
+    applyLayersPolicy();
+    updateUiByContext();
+    statusBar()->showMessage("Query cleared.");
 }
 
 // ======================
-// policy: Query 우선 / 아니면 Live
+// Filter
 // ======================
+void MainWindow::onApplyFilter()
+{
+    filterSsid_ = ui->cbSsid ? ui->cbSsid->currentText() : "ALL";
+
+    // Threshold UI가 숨김이지만, 기존 UX 유지: cbThr 읽어 적용
+    filterThrEnable_ = true;
+    filterThrRssi_ = ui->cbThr ? ui->cbThr->currentText().toInt() : -70;
+
+    // Query 모드면 자동 재로드
+    if (!loadedSessionId_.isEmpty()) {
+        if (ui->cbSessionId) {
+            for (int i=0; i<ui->cbSessionId->count(); ++i) {
+                if (ui->cbSessionId->itemData(i).toString() == loadedSessionId_ ||
+                    ui->cbSessionId->itemText(i) == loadedSessionId_) {
+                    ui->cbSessionId->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
+        on_btnSessionLoad_clicked();
+    }
+
+    updateUiByContext();
+}
+
+// ======================
+// Layers policy
+// ======================
+MainWindow::Mode MainWindow::deriveModeFromContext() const
+{
+    if (!loadedSessionId_.isEmpty()) return Mode::Query;
+    if (accumulating_) return Mode::Measurement;
+    return Mode::View;
+}
+
+void MainWindow::updateUiByContext()
+{
+    const Mode m = deriveModeFromContext();
+
+    if (ui->btnMeasureStart) {
+        if (m == Mode::Measurement || startOptimistic_) ui->btnMeasureStart->setText("Stop");
+        else                                           ui->btnMeasureStart->setText("Start");
+        ui->btnMeasureStart->setEnabled(!sessionPending_);
+    }
+
+    if (robotItem)
+        robotItem->setVisible(ui->chkShowRobot->isChecked() && poseReady_);
+
+    applyLayersPolicy();
+}
+
+
 void MainWindow::applyLayersPolicy()
 {
-    const bool showHeat = (ui->chkShowHeatmap ? ui->chkShowHeatmap->isChecked() : true);
+    const bool showHeat = ui->chkShowHeatmap->isChecked();
 
-    if (liveHeatItem)  liveHeatItem->setVisible(false);
-    if (queryHeatItem) queryHeatItem->setVisible(false);
+    liveLayer_.setVisible(false);
+    if (queryLayer_.isReady()) queryLayer_.setVisible(false);
+    if (simLayer_.isReady())   simLayer_.setVisible(false);
 
     if (!showHeat) return;
 
-    const bool queryCtx = !currentSessionId_.isEmpty();
-    if (queryCtx) {
-        if (queryHeatItem) queryHeatItem->setVisible(true);
+    const bool queryCtx = !loadedSessionId_.isEmpty();
+
+    if (queryCtx && queryLayer_.isReady()) {
+        queryLayer_.setVisible(true);
         return;
     }
-    if (liveHeatItem) liveHeatItem->setVisible(true);
+
+    // 기본은 live
+    liveLayer_.setVisible(true);
+}
+
+void MainWindow::onLayerHeatmap(bool)
+{
+    applyLayersPolicy();
+}
+
+void MainWindow::onLayerRobot(bool)
+{
+    if (robotItem)
+        robotItem->setVisible(ui->chkShowRobot->isChecked() && poseReady_);
+}
+
+void MainWindow::onLayerPins(bool)
+{
+    // AP Pins/sim pins 정책은 기존 프로젝트 코드 유지 대상
 }
 
 // ======================
-// click -> nav goal
+// Click handling (nav goal)
 // ======================
 bool MainWindow::eventFilter(QObject* obj, QEvent* ev)
 {
@@ -546,14 +885,230 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev)
         auto* me = static_cast<QMouseEvent*>(ev);
         const QPointF scenePos = ui->graphicsView->mapToScene(me->pos());
 
-        int px=0, py=0;
-        if (!sceneToMapPixel(scenePos, px, py)) return true;
+        // Left click -> nav goal
+        if (me->button() == Qt::LeftButton) {
+            int px=0, py=0;
+            if (!sceneToMapPixel(scenePos, px, py)) return true;
 
-        double x_m=0.0, y_m=0.0;
-        if (!pixelToMap(px, py, x_m, y_m)) return true;
+            double x_m=0.0, y_m=0.0;
+            if (!pixelToMap(px, py, x_m, y_m)) return true;
 
-        if (rosThread) rosThread->requestNavigateTo(x_m, y_m, 0.0);
+            if (rosThread) rosThread->requestNavigateTo(x_m, y_m, 0.0);
+            return true;
+        }
         return true;
     }
     return false;
 }
+
+// ======================
+// Legend overlay
+// ======================
+// void MainWindow::initLegendOverlay()
+// {
+//     if (!ui->graphicsView) return;
+//     if (legendOverlay_) return;
+
+//     legendOverlay_ = new LegendBarWidget(ui->graphicsView->viewport());
+//     legendOverlay_->setRangeDbm(-80, 0);
+//     legendOverlay_->setTitle("Voice + Data | dBm");
+//     legendOverlay_->setValueDbm(-67);
+
+//     legendOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+//     legendOverlay_->setStyleSheet("background: transparent;");
+//     legendOverlay_->setFixedSize(360, 64);
+
+//     updateLegendOverlayGeometry();
+//     legendOverlay_->show();
+// }
+
+// void MainWindow::updateLegendOverlayGeometry()
+// {
+//     if (!legendOverlay_ || !ui->graphicsView) return;
+
+//     const int margin = 12;
+//     const QRect vp = ui->graphicsView->viewport()->rect();
+
+//     const int w = legendOverlay_->width();
+//     const int h = legendOverlay_->height();
+
+//     const int x = vp.right() - w - margin;
+//     const int y = vp.bottom() - h - margin;
+
+//     legendOverlay_->move(x, y);
+// }
+
+void MainWindow::onListSsidsReply(bool ok,
+                                  const QString& message,
+                                  const QString& session_id,
+                                  const QList<QString>& ssids)
+{
+    Q_UNUSED(session_id);
+
+    if (!ok) {
+        statusBar()->showMessage("ListSsids failed: " + message, 3000);
+        // 실패 시 최소한 ALL만 남김
+        if (ui->cbSsid) {
+            ui->cbSsid->clear();
+            ui->cbSsid->addItem("ALL");
+        }
+        return;
+    }
+
+    if (!ui->cbSsid) return;
+
+    //  세션 선택 시 “해당 세션의 SSID만”으로 갱신
+    ui->cbSsid->blockSignals(true);
+    ui->cbSsid->clear();
+    ui->cbSsid->addItem("ALL");
+    for (const auto& s : ssids) {
+        if (!s.isEmpty())
+            ui->cbSsid->addItem(s);
+    }
+    ui->cbSsid->setCurrentIndex(0);
+    ui->cbSsid->blockSignals(false);
+
+    statusBar()->showMessage(QString("SSID list updated (%1)").arg(ssids.size()), 1500);
+}
+
+// ======================
+// A) Session Refresh (ListSessions.srv)
+// ======================
+void MainWindow::onSessionRefresh()
+{
+    if (!rosThread) return;
+
+    // DB 전체 목록 갱신
+    statusBar()->showMessage("Refreshing sessions...");
+
+    // limit/offset UI가 없으니 기본값
+    const uint32_t limit = 200;
+    const uint32_t offset = 0;
+
+    rosThread->requestListSessions(limit, offset);
+}
+
+// ======================
+// B) Session combo changed -> ListSsids.srv
+// ======================
+void MainWindow::onSessionComboChanged(int /*index*/)
+{
+    if (!rosThread) return;
+
+    const QString sid = currentSessionIdText();
+    if (sid.isEmpty() || sid.startsWith("(")) return;
+
+    // 세션 선택 시 해당 세션의 SSID 목록만 가져오기
+    const uint32_t limit = 200;
+    const uint32_t offset = 0;
+
+    rosThread->requestListSsid(sid, limit, offset);
+}
+
+// ======================
+// ListSessions reply
+// ======================
+void MainWindow::onListSessionsReply(bool ok,
+                                     const QString& message,
+                                     const QList<QString>& session_ids,
+                                     const QList<QString>& started_at,
+                                     const QList<QString>& ended_at)
+{
+    Q_UNUSED(started_at);
+    Q_UNUSED(ended_at);
+
+    if (!ui->cbSessionId) return;
+
+    if (!ok) {
+        statusBar()->showMessage("ListSessions failed: " + message, 3000);
+        return;
+    }
+
+    ui->cbSessionId->blockSignals(true);
+    ui->cbSessionId->clear();
+    ui->cbSessionId->setEditable(true);
+
+    // 표시용: session_id만 넣음 (started/ended는 필요하면 itemText에 붙이기)
+    for (const auto& sid : session_ids) {
+        if (!sid.isEmpty())
+            ui->cbSessionId->addItem(sid, sid);
+    }
+
+    if (ui->cbSessionId->count() == 0)
+        ui->cbSessionId->addItem("(no sessions)", "");
+
+    ui->cbSessionId->setCurrentIndex(0);
+    ui->cbSessionId->blockSignals(false);
+
+    statusBar()->showMessage(QString("Sessions updated (%1)").arg(session_ids.size()), 1500);
+
+    // 첫 세션 기준으로 SSID 목록도 갱신
+    onSessionComboChanged(ui->cbSessionId->currentIndex());
+}
+
+// ======================
+// current session text helper (링커 에러 원인)
+// ======================
+QString MainWindow::currentSessionIdText() const
+{
+    if (!ui->cbSessionId) return "";
+
+    const QString data = ui->cbSessionId->currentData().toString().trimmed();
+    if (!data.isEmpty()) return data;
+
+    return ui->cbSessionId->currentText().trimmed();
+}
+
+
+void MainWindow::initLegendOverlay()
+{
+    if (!ui->graphicsView) return;
+    if (legendOverlay_) return;
+
+    legendOverlay_ = new LegendBarWidget(ui->graphicsView->viewport());
+    legendOverlay_->setRangeDbm(-80, 0);
+    legendOverlay_->setTitle("Voice + Data | dBm");
+    legendOverlay_->setValueDbm(-67);
+
+    //  오버레이: 클릭/드래그 방해 금지
+    legendOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+
+    //  배경은 살짝만(겹쳐도 가독성 확보) - 원치 않으면 제거 가능
+    legendOverlay_->setStyleSheet(
+        "background: rgba(0,0,0,80);"
+        "border-radius: 10px;"
+        );
+
+    legendOverlay_->setFixedSize(360, 64);
+    legendOverlay_->show();
+
+    //  항상 viewport 우하단으로 재배치
+    updateLegendOverlayGeometry();
+
+    //  viewport 리사이즈/레이아웃 변동을 놓치는 경우 대비: 주기적으로 위치 보정(가벼움)
+    if (!legendPosTimer_) {
+        legendPosTimer_ = new QTimer(this);
+        connect(legendPosTimer_, &QTimer::timeout, this, [this]{
+            updateLegendOverlayGeometry();
+        });
+        legendPosTimer_->start(200);  // 0.2초마다 위치 보정
+    }
+}
+
+void MainWindow::updateLegendOverlayGeometry()
+{
+    if (!legendOverlay_ || !ui->graphicsView) return;
+
+    const int margin = 12;
+    const QRect vp = ui->graphicsView->viewport()->rect();
+
+    const int w = legendOverlay_->width();
+    const int h = legendOverlay_->height();
+
+    const int x = vp.width()  - w - margin;
+    const int y = vp.height() - h - margin;
+
+    legendOverlay_->move(x, y);
+    legendOverlay_->raise();   //  항상 위로
+}
+

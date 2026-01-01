@@ -272,16 +272,16 @@
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="btnQueryClear">
+        <widget class="QPushButton" name="btnSessionRefresh">
          <property name="text">
-          <string>Clear</string>
+          <string>Refresh</string>
          </property>
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="btnSessionRefresh">
+        <widget class="QPushButton" name="btnQueryClear">
          <property name="text">
-          <string>Refresh</string>
+          <string>Clear</string>
          </property>
         </widget>
        </item>
@@ -402,7 +402,7 @@
               <enum>QFrame::Shadow::Plain</enum>
              </property>
              <property name="currentIndex">
-              <number>1</number>
+              <number>2</number>
              </property>
              <widget class="QWidget" name="pageSession">
               <layout class="QVBoxLayout" name="pageSessionLayout">
@@ -545,57 +545,10 @@
                   <string>AP Simulation</string>
                  </property>
                  <layout class="QGridLayout" name="gbSimLayout">
-                  <item row="0" column="0" colspan="2">
-                   <widget class="QCheckBox" name="chkSimEnable">
-                    <property name="text">
-                     <string>Enable Sim Click</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item row="1" column="0">
-                   <widget class="QLabel" name="lblTxPower">
-                    <property name="text">
-                     <string>Tx Power (dBm)</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item row="1" column="1">
-                   <widget class="QDoubleSpinBox" name="spTxPower">
-                    <property name="minimum">
-                     <double>-90.000000000000000</double>
-                    </property>
-                    <property name="maximum">
-                     <double>-10.000000000000000</double>
-                    </property>
-                    <property name="value">
-                     <double>-40.000000000000000</double>
-                    </property>
-                   </widget>
-                  </item>
                   <item row="2" column="0">
                    <widget class="QLabel" name="lblSimChannel">
                     <property name="text">
                      <string>Channel</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item row="2" column="1">
-                   <widget class="QSpinBox" name="spSimChannel">
-                    <property name="minimum">
-                     <number>1</number>
-                    </property>
-                    <property name="maximum">
-                     <number>165</number>
-                    </property>
-                    <property name="value">
-                     <number>36</number>
-                    </property>
-                   </widget>
-                  </item>
-                  <item row="3" column="0">
-                   <widget class="QLabel" name="lblBandwidth">
-                    <property name="text">
-                     <string>Bandwidth</string>
                     </property>
                    </widget>
                   </item>
@@ -626,10 +579,57 @@
                     </item>
                    </widget>
                   </item>
+                  <item row="1" column="1">
+                   <widget class="QDoubleSpinBox" name="spTxPower">
+                    <property name="minimum">
+                     <double>-90.000000000000000</double>
+                    </property>
+                    <property name="maximum">
+                     <double>-10.000000000000000</double>
+                    </property>
+                    <property name="value">
+                     <double>-40.000000000000000</double>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="3" column="0">
+                   <widget class="QLabel" name="lblBandwidth">
+                    <property name="text">
+                     <string>Bandwidth</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="1">
+                   <widget class="QSpinBox" name="spSimChannel">
+                    <property name="minimum">
+                     <number>1</number>
+                    </property>
+                    <property name="maximum">
+                     <number>165</number>
+                    </property>
+                    <property name="value">
+                     <number>36</number>
+                    </property>
+                   </widget>
+                  </item>
                   <item row="4" column="0" colspan="2">
                    <widget class="QPushButton" name="btnClearPins">
                     <property name="text">
                      <string>Clear Pins</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="0">
+                   <widget class="QLabel" name="lblTxPower">
+                    <property name="text">
+                     <string>Tx Power (dBm)</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="0" column="0" colspan="2">
+                   <widget class="QCheckBox" name="chkSimEnable">
+                    <property name="text">
+                     <string>Enable Sim Click</string>
                     </property>
                    </widget>
                   </item>

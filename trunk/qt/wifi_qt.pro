@@ -6,7 +6,12 @@ TARGET = wifi_qt
 
 ROS_ROOT = /opt/ros/humble
 ROS_WS = $$(HOME)/turtlebot3_ws
+# PKG_CONFIG_PATH = /opt/ros/humble/lib/pkgconfig:/opt/ros/humble/share/pkgconfig:$$PKG_CONFIG_PATH
+# export(PKG_CONFIG_PATH)
+# CONFIG += link_pkgconfig
+# PKGCONFIG += rclcpp std_srvs
 
+INCLUDEPATH += /opt/ros/humble/include/std_srvs
 INCLUDEPATH += $$HOME/turtlebot3_ws/install/wifi_interface/include
 INCLUDEPATH += $$ROS_ROOT/include
 INCLUDEPATH += $$ROS_ROOT/include/rclcpp_action
@@ -67,13 +72,14 @@ LIBS += -L$$ROS_WS/install/wifi_interface/lib \
         -lrosidl_typesupport_cpp \
         -lrosidl_runtime_c
 
-LIBS += -lrosidl_typesupport_cpp \
-        -lrosidl_runtime_c
+LIBS += -L/opt/ros/humble/lib -lstd_srvs__rosidl_typesupport_cpp
+
 
 # 링크 옵션
 QMAKE_LFLAGS += -Wl,--no-as-needed
 QMAKE_LFLAGS += -Wl,-rpath,$$ROS_ROOT/lib
 
+LIBS += -L/opt/ros/humble/lib -lstd_srvs__rosidl_typesupport_cpp
 
 LIBS += \
     -L/usr/lib/x86_64-linux-gnu -lsqlite3 \

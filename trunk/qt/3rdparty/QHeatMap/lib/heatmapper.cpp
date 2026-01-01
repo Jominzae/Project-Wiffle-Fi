@@ -1,9 +1,8 @@
 #include "heatmapper.h"
-#include <QImage>
 #include <QColor>
 #include <QPainter>
 #include <QRadialGradient>
-#include <QDebug>
+#include <QtGlobal>
 #include "gradientpalette.h"
 
 HeatMapper::HeatMapper(QImage *image, GradientPalette *palette,
@@ -25,7 +24,7 @@ HeatMapper::HeatMapper(QImage *image, GradientPalette *palette,
     Q_ASSERT(alphaCanvas_);
     alphaCanvas_->fill(QColor(0, 0, 0, 0));
 
-    width_ = image->width();
+    width_  = image->width();
     height_ = image->height();
 
     data_.resize(width_ * height_);
@@ -34,8 +33,16 @@ HeatMapper::HeatMapper(QImage *image, GradientPalette *palette,
 
 HeatMapper::~HeatMapper()
 {
-    // 기존 정책 유지(원본은 delete 안함) — 필요하면 delete alphaCanvas_ 하세요.
-    // delete alphaCanvas_;
+    delete alphaCanvas_;
+    alphaCanvas_ = nullptr;
+}
+
+void HeatMapper::clearAlpha()
+{
+    if (!alphaCanvas_ || !mainCanvas_) return;
+    const QColor clear(0,0,0,0);
+    alphaCanvas_->fill(clear);
+    mainCanvas_->fill(clear);
 }
 
 qreal HeatMapper::increase(int x, int y, qreal delta)
@@ -43,12 +50,10 @@ qreal HeatMapper::increase(int x, int y, qreal delta)
     int index = (y - 1) * width_ + (x - 1);
     qreal v = data_[index] + delta;
 
-    // 절대모드에서 누적을 0~1로 포화하면 색 의미가 유지됨(추천)
     if (cap01_) {
         if (v < 0.0) v = 0.0;
         if (v > 1.0) v = 1.0;
     }
-
     data_[index] = v;
     return data_[index];
 }
@@ -63,17 +68,13 @@ void HeatMapper::addPoint(int x, int y, qreal value)
     if (x <= 0 || y <= 0 || x > width_ || y > height_) return;
     if (value <= 0.0) return;
 
-    // absoluteMode에서는 value를 intensity01(0~1)로 쓴다고 가정
-    // caller(MainWindow)에서 이미 0~1로 넣고 있음.
     const qreal count = increase(x, y, value);
 
-    // ✅ 절대모드: max_ 갱신/재그리기 불필요 (항상 동일 기준)
     if (absoluteMode_) {
         drawAlpha(x, y, count, true);
         return;
     }
 
-    // 기존 상대모드 유지
     if (max_ < count) {
         max_ = count;
         redraw();
@@ -84,9 +85,9 @@ void HeatMapper::addPoint(int x, int y, qreal value)
 
 void HeatMapper::redraw()
 {
-    QColor color(0, 0, 0, 0);
-    alphaCanvas_->fill(color);
-    mainCanvas_->fill(color);
+    QColor clear(0, 0, 0, 0);
+    alphaCanvas_->fill(clear);
+    mainCanvas_->fill(clear);
 
     int size = data_.size();
     for (int i = 0; i < size; ++i) {
@@ -96,17 +97,38 @@ void HeatMapper::redraw()
     colorize();
 }
 
+void HeatMapper::stampAbs(int x, int y, qreal ratio01, bool colorize_now)
+{
+    //  ratio01(0~1) 그대로 라디얼 강도로 사용
+    if (!alphaCanvas_ || !mainCanvas_) return;
+    if (x <= 0 || y <= 0 || x > width_ || y > height_) return;
+
+    if (ratio01 < 0.0) ratio01 = 0.0;
+    if (ratio01 > 1.0) ratio01 = 1.0;
+
+    const int alpha = int(ratio01 * 255.0);
+
+    QRadialGradient gradient(x, y, radius_);
+    gradient.setColorAt(0, QColor(0, 0, 0, alpha));
+    gradient.setColorAt(1, QColor(0, 0, 0, 0));
+
+    QPainter painter(alphaCanvas_);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(gradient);
+    painter.drawEllipse(QPoint(x, y), radius_, radius_);
+
+    if (colorize_now) colorize(x, y);
+}
+
 void HeatMapper::drawAlpha(int x, int y, qreal count, bool colorize_now)
 {
     qreal ratio = 0.0;
 
     if (absoluteMode_) {
-        // ✅ 절대모드: count 자체가 0~1 스케일이라고 보고 사용
         ratio = count;
         if (ratio < 0.0) ratio = 0.0;
         if (ratio > 1.0) ratio = 1.0;
     } else {
-        // 기존 상대모드: max_ 대비 정규화
         ratio = (max_ > 0.0) ? (count / max_) : 0.0;
         if (ratio < 0.0) ratio = 0.0;
         if (ratio > 1.0) ratio = 1.0;
@@ -149,23 +171,17 @@ void HeatMapper::colorize(int x, int y)
 
 void HeatMapper::colorize(int left, int top, int right, int bottom)
 {
-    int alpha = 0;
-    int finalAlpha = 0;
-    QColor color;
+    if (!alphaCanvas_ || !mainCanvas_ || !palette_) return;
 
     for (int i = left; i < right; ++i) {
         for (int j = top; j < bottom; ++j) {
-            alpha = qAlpha(alphaCanvas_->pixel(i, j));
-            if (!alpha)
-                continue;
+            const int a = qAlpha(alphaCanvas_->pixel(i, j));
+            if (!a) continue;
 
-            finalAlpha = (alpha < opacity_ ? alpha : opacity_);
-            color = palette_->getColorAt(alpha);
+            const int finalAlpha = (a < opacity_ ? a : opacity_);
+            const QColor c = palette_->getColorAt(a); // a: 0~255
 
-            mainCanvas_->setPixel(i, j, qRgba(color.red(),
-                                              color.green(),
-                                              color.blue(),
-                                              finalAlpha));
+            mainCanvas_->setPixel(i, j, qRgba(c.red(), c.green(), c.blue(), finalAlpha));
         }
     }
 }

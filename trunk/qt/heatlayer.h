@@ -1,37 +1,51 @@
 #pragma once
 #include <QImage>
-#include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
-#include "heatmapper.h"
-#include "gradientpalette.h"
+#include <QGraphicsScene>
+#include <QVector>
 
-class HeatLayer {
+class HeatMapper;
+class GradientPalette;
+
+class HeatLayer
+{
 public:
     ~HeatLayer();
 
     bool init(QGraphicsScene* scene, const QSize& size, int z, int radius_px, int opacity);
 
-    // ✅ 캔버스만 비우기 (mapper 유지)
-    void clearCanvas();
+    void clear(bool clearCanvasToo = true);
+    void setVisible(bool v);
 
-    // ✅ 점 데이터만 비우는 용도(사실 addPoint가 mapper에 직접 찍으니 clearCanvas만 써도 됨)
-    void clear(bool clearCanvasToo);
+    //  평균용
+    void clearStats(); // sum/cnt/active 초기화
+    void addPointMean(int px, int py, float intensity01); // 1-based 입력(현재 프로젝트 그대로)
+    void flushMean(); // 평균 기반 렌더
 
+    // (옵션) 기존 방식 유지하고 싶으면 그대로 둠
     void addPoint(int px, int py, float intensity01);
     void flush();
-    void setVisible(bool v);
+
     bool isReady() const { return mapper_ && item_; }
 
-    // ✅ 브러시 변경(=HeatMapper 재생성)
-    void resetBrush(int radius_px, int opacity);
+private:
+    void clearCanvas();
 
 private:
     QImage canvas_;
-    GradientPalette* palette_ = nullptr;
-    HeatMapper* mapper_ = nullptr;
     QGraphicsPixmapItem* item_ = nullptr;
 
-    // ✅ 현재 브러시 파라미터 저장 (clear에서 재생성하지 않더라도 상태 추적용)
-    int radius_px_ = 1;
+    HeatMapper* mapper_ = nullptr;
+    GradientPalette* palette_ = nullptr;
+
+    int radius_px_ = 10;
     int opacity_ = 160;
+
+    //  평균 집계 버퍼
+    int w_ = 0;
+    int h_ = 0;
+    QVector<float> sum_;         // size = w*h
+    QVector<uint32_t> cnt_;      // size = w*h
+    QVector<int> active_idx_;    // 방문한 픽셀 인덱스 리스트
+    QVector<uint8_t> active_flag_; // 중복 방지(0/1)
 };

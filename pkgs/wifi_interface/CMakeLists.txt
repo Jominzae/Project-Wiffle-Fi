@@ -9,6 +9,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/WifiRssi.msg"
   "msg/WifiFused.msg"
   "srv/GetHeatmap.srv"
+  "srv/ListSessions.srv"
+  "srv/DeleteSession.srv"
   DEPENDENCIES std_msgs
 )
 

@@ -1,0 +1,8 @@
+string session_id
+uint32 limit
+uint32 offset
+---
+bool ok
+string message
+string[] ssids
+

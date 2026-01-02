@@ -153,6 +153,24 @@ MainWindow::MainWindow(QWidget *parent)
         });
     }
 
+    // Planning 선택 시: 격자 숨김
+    if (ui->tbPlanning) {
+        connect(ui->tbPlanning, &QToolButton::toggled, this, [this](bool on){
+            if (on) setGridVisible(false);
+        });
+    }
+
+    // Survey 선택 시: 격자 보임
+    if (ui->tbSurvey) {
+        connect(ui->tbSurvey, &QToolButton::toggled, this, [this](bool on){
+            if (on) setGridVisible(true);
+        });
+    }
+
+    // 초기 상태 반영 (tbPlanning이 checked=true라면 기본 false)
+    setGridVisible(ui->tbSurvey && ui->tbSurvey->isChecked());
+
+
 
     //  디폴트: autoExclusive 비활성 + 패널은 닫힌 상태로 시작(원하는 경우)
     closeLeftPanel();
@@ -310,6 +328,8 @@ bool MainWindow::loadStaticMap(const QString &yamlPath)
 
     scene->setSceneRect(QRectF(0, 0, mapImageSize_.width(), mapImageSize_.height()));
     applyViewTransform();
+
+    initGridOverlay();
     return true;
 }
 
@@ -1347,6 +1367,29 @@ void MainWindow::clearSimPinsAndHeat()
     }
 
     applyLayersPolicy();
+}
+
+void MainWindow::initGridOverlay()
+{
+    if (!scene || mapImageSize_.isEmpty()) return;
+    if (gridItem_) return;
+
+    // 한 칸 2.5cm = 0.025m
+    const double cell_m = 0.025;
+    int stepPx = int(std::lround(cell_m / mapMeta_.resolution)); // m / (m/px) = px
+
+    stepPx = qMax(2, stepPx); // 너무 촘촘하면 최소 2px (원하면 3~5로)
+
+    gridItem_ = new GridOverlayItem(mapImageSize_, stepPx);
+    gridItem_->setZValue(1);
+    gridItem_->setVisible(false);
+    scene->addItem(gridItem_);
+}
+
+
+void MainWindow::setGridVisible(bool on)
+{
+    if (gridItem_) gridItem_->setVisible(on);
 }
 
 

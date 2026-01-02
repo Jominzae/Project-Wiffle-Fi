@@ -10,8 +10,49 @@
 #include <QSet>
 #include <QString>
 #include <QList>
+#include <QGraphicsItem>
+#include <QPainter>
 
 #include "heatlayer.h"
+
+class GridOverlayItem : public QGraphicsItem {
+public:
+    GridOverlayItem(const QSize& sizePx, int stepPx = 20)
+        : size_(sizePx), step_(stepPx) {}
+
+    QRectF boundingRect() const override {
+        return QRectF(0, 0, size_.width(), size_.height());
+    }
+
+    void setStep(int stepPx) { step_ = qMax(2, stepPx); update(); }
+    void setSize(const QSize& s) { prepareGeometryChange(); size_ = s; update(); }
+
+    void paint(QPainter* p, const QStyleOptionGraphicsItem*, QWidget*) override {
+        if (size_.isEmpty()) return;
+        p->setRenderHint(QPainter::Antialiasing, false);
+
+        // 격자 선 스타일 (연한 회색, 1px)
+        QPen pen(QColor(0, 0, 0, 40));
+        pen.setWidth(1);
+        p->setPen(pen);
+
+        // 세로선
+        for (int x = 0; x <= size_.width(); x += step_) {
+            p->drawLine(QPointF(x + 0.5, 0), QPointF(x + 0.5, size_.height()));
+        }
+        // 가로선
+        for (int y = 0; y <= size_.height(); y += step_) {
+            p->drawLine(QPointF(0, y + 0.5), QPointF(size_.width(), y + 0.5));
+        }
+    }
+
+private:
+    QSize size_;
+    int step_;
+};
+
+
+
 
 // forward
 namespace Ui { class MainWindow; }
@@ -78,6 +119,10 @@ private slots:
     void onClearPinsClicked();
 
 private:
+    GridOverlayItem* gridItem_ = nullptr;
+    void initGridOverlay();
+    void setGridVisible(bool on);
+
     //legendbar
     bool   legendEmaInit_ = false;
     double legendEma_     = -70.0;

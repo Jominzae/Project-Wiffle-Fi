@@ -83,6 +83,7 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 | DB Node             | 데이터 저장 및 쿼리      |
 
 ---
+
 ### 🖥️ Qt GUI
 <img width="1020" height="720" alt="image" src="https://github.com/user-attachments/assets/1a2c0731-04b6-4e26-893a-b1c5a91e53c1" />
 
@@ -91,9 +92,21 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 - SSID 선택 및 ALL 모드 지원
 - 실시간 / 저장 데이터 히트맵 렌더링
 
-## 6. 역할 및 기여
+---
 
-## 7. 트러블 슈팅
+## 🧇역할 및 기여
+1) ESP32 펌웨어 개발
+ - ESP32에서 목표 AP에 대한 RSSI 값을 주기적으로 읽어오는 로직 구현
+ - SSID, RSSI를 포함한 직렬 패킷 포맷 설계
+ 2) UART 통신 및 Device Driver 설계 및 구현
+ - ESP32 – Raspberry Pi 간 UART 설정 및 통신 구조 설계
+3) Raspberry Pi 와 ROS2 연동
+ - /dev/Wi-Fi_rssi에서 읽어오는 ROS2 node를 생성하고 /Wi-Fi/raw topic으로 publish하는 과정 설계
+
+---
+
+## 📡트러블 슈팅
+<img width="1053" height="582" alt="image" src="https://github.com/user-attachments/assets/211691bf-b478-41cc-b7c7-3b76b8f4dd7b" />
 
 
 

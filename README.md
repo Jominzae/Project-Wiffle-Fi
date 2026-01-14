@@ -16,7 +16,8 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 
 ---
 ## 🏗️ 프로젝트 아키텍처
-<img width="1020" height="519" alt="image" src="https://github.com/user-attachments/assets/f30c6edd-5e92-4fc1-b3b8-d52a23c6dde4" />  
+<img width="1332" height="750" alt="image" src="https://github.com/user-attachments/assets/0dd7c474-d6b3-4e97-8ef0-0eed86eae134" />
+ 
 
 ### 🔧 Hardware & Sensor
 
@@ -41,14 +42,17 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 ---
 ## ⚙️ 주요 기능 상세
 ### 🔌Wi-Fi RSSI (ESP32)
-<img width="1020" height="519" alt="image" src="https://github.com/user-attachments/assets/a5b42a23-405d-468e-9c96-be3acc9493d4" />  
+<img width="1496" height="841" alt="image" src="https://github.com/user-attachments/assets/41f14572-12a1-4a9c-bbc1-c97f99022526" />
+
+ 
 
 **주변 Wi-Fi AP 스캔 및 RSSI 측정**   
   - Wi-Fi Scan → SSID / RSSI → UART 전송  
 
 ---
 ### 🤖 Reinforcement Learning
-<img width="1020" height="519" alt="image" src="https://github.com/user-attachments/assets/b68eff70-8657-445d-8a97-3e2e8a901a85" />
+<img width="1497" height="839" alt="image" src="https://github.com/user-attachments/assets/c69a7e3a-8c8b-4444-ab49-811848cfe82e" />
+
 
 **강화학습 기반 커버리지 탐색**  
 -	새로운 공간 탐색 시 보상 증가  
@@ -66,7 +70,8 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
     - Avg New Cell: 73.36
 ---
 ### 🧩 ROS2 Node Structure
-<img width="1020" height="720" alt="image" src="https://github.com/user-attachments/assets/2796353a-dcfc-4d14-a2e3-25cd5084b916" />
+<img width="1500" height="839" alt="image" src="https://github.com/user-attachments/assets/e9e37126-2466-44f3-b3c3-ce805f583804" />
+
 
 **로봇 주행, 센서 데이터 통합**  
 - Turtlebot3 제어
@@ -85,7 +90,8 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 ---
 
 ### 🖥️ Qt GUI
-<img width="1020" height="720" alt="image" src="https://github.com/user-attachments/assets/1a2c0731-04b6-4e26-893a-b1c5a91e53c1" />
+<img width="1497" height="839" alt="image" src="https://github.com/user-attachments/assets/4ad66f0e-b679-4af9-a784-3b61f2b3d029" />
+
 
 **사용자 인터페이스 및 히트맵 시각화**  
 - 세션 기반 데이터 관리

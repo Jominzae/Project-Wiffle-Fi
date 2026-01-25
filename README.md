@@ -2,7 +2,7 @@
 *Reinforcement Learning 기반 실내 Wi-Fi 커버리지 자동 분석 시스템*  
 
 ---
-## 🌐 프로젝트 개요
+## 1. 프로젝트 개요
 
 > ❓ **“건물 안에 Wi-Fi 안 터지는 곳이 있던데요?”**
 
@@ -15,7 +15,7 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 - **ROS2** 기반 모듈형 아키텍처
 
 ---
-## 🏗️ 프로젝트 아키텍처
+## 2. 프로젝트 아키텍처
 <img width="1332" height="750" alt="image" src="https://github.com/user-attachments/assets/0dd7c474-d6b3-4e97-8ef0-0eed86eae134" />
  
 
@@ -32,7 +32,7 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 - Qt GUI (Heatmap / Session / Simulation)
 
 ---
-## ⭐ 핵심 기능
+## 3. 핵심 기능
 | 목표              | 설명                    |
 | --------------- | --------------------- |
 | RL 커버리지 탐색      | 강화학습을 통해 공간을 효율적으로 탐색 |
@@ -40,7 +40,7 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 | Maintenance GUI | Qt 기반 히트맵 시각화 및 관리 UI |
 
 ---
-## ⚙️ 주요 기능 상세
+## 4. 주요 기능 상세
 ### 🔌Wi-Fi RSSI (ESP32)
 <img width="1496" height="841" alt="image" src="https://github.com/user-attachments/assets/41f14572-12a1-4a9c-bbc1-c97f99022526" />
 
@@ -100,7 +100,7 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 
 ---
 
-## 🧇역할 및 기여
+## 5. 역할 및 기여
 1) ESP32 펌웨어 개발
  - ESP32에서 목표 AP에 대한 RSSI 값을 주기적으로 읽어오는 로직 구현
  - SSID, RSSI를 포함한 직렬 패킷 포맷 설계
@@ -111,7 +111,7 @@ WAFFLE-FI는 **강화학습 기반 커버리지 탐색 로봇**을 이용해 **�
 
 ---
 
-## 📡트러블 슈팅
+## 6. 트러블 슈팅
 <img width="1053" height="582" alt="image" src="https://github.com/user-attachments/assets/211691bf-b478-41cc-b7c7-3b76b8f4dd7b" />
 
 
